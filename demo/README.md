@@ -18,9 +18,8 @@ Consulting Knowledge RAG System
 하나의 약관 파일(예: 인터넷 이용약관) 내에서 정확한 조항을 찾는 기본 모델입니다.
 
   - **Data_preprocessing_sample.ipynb**
-    - PDF 문서를 로드하고 임베딩하여 로컬 벡터 DB(Chroma)를 생성하는 **간이(Simple) 구축 스크립트**입니다.
-    - RAG 시스템 테스트를 위한 초기 데이터 적재 용도로 사용됩니다.
-
+      - PDF 문서를 로드하고 임베딩하여 로컬 벡터 DB(Chroma)를 생성하는 **간이(Simple) 구축 스크립트**입니다.
+      - RAG 시스템 테스트를 위한 초기 데이터 적재 용도로 사용됩니다.
   - **Searchquery\_simple\_langgraph\_withOpenai.py**
       - **기능**: LangGraph의 State/Node 구조를 활용한 기본 검색기
       - **특징**: 확장성을 고려한 그래프 구조, 질문 분석 → 키워드 추출 → 검색 흐름 제어
