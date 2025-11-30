@@ -1,6 +1,6 @@
-# KT 상담원 AI Agent API
+# 상담원 AI Agent API
 
-KT 고객센터 상담원을 지원하는 AI Agent FastAPI 서버입니다.
+고객센터 상담원을 지원하는 AI Agent FastAPI 서버입니다.
 
 ## 📋 개요
 
@@ -233,6 +233,3 @@ readinessProbe:
 3. **Rate Limiting**: 환경변수로 조절 가능
 4. **인증**: 필요 시 JWT 또는 API Key 인증 추가
 
-## 📝 라이선스
-
-Internal Use Only - KT 내부 사용 전용
