@@ -53,13 +53,13 @@ class Settings(BaseSettings):
     # [선택] 임베딩 모델 설정
     # ==========================================
     EMBEDDING_MODEL_NAME: str = Field(
-        default="jhgan/ko-sroberta-multitask",
-        description="HuggingFace 임베딩 모델명"
+        default="text-embedding-3-small",
+        description="OpenAI 임베딩 모델명 (벡터 DB 생성 시 사용한 모델과 동일해야 함)"
     )
     
     EMBEDDING_DEVICE: str = Field(
         default="cpu",
-        description="임베딩 모델 실행 디바이스 (cpu/cuda)"
+        description="임베딩 모델 실행 디바이스 (OpenAI 임베딩은 사용하지 않음)"
     )
     
     # ==========================================
