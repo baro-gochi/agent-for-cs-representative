@@ -265,8 +265,9 @@ def response_generator_node(state: AgentState) -> dict:
         api_key=settings.OPENAI_API_KEY,
 
         temperature=0.2,  # 약간의 창의성 허용
-        max_tokens=500,
+        max_tokens=800,  # 충분한 길이의 답변 생성 허용
         streaming=False
+    
     )
     
     # -----------------------------------------
