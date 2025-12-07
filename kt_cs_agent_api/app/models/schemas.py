@@ -328,3 +328,175 @@ class QueueStatusResponse(BaseModel):
         ...,
         description="새 요청 수락 가능 여부"
     )
+
+
+# ==========================================
+# [신규] 비교용 API 모델
+# ==========================================
+
+class ComparisonRequest(BaseModel):
+    """
+    비교용 API 공통 요청 모델
+    """
+    summary: str = Field(
+        ...,
+        min_length=5,
+        max_length=2000,
+        description="상담 내용 요약",
+        json_schema_extra={"example": "인터넷 약정 해지 시 위약금 계산법이 궁금합니다."}
+    )
+    include_documents: bool = Field(
+        default=True,
+        description="응답에 참조 문서 포함 여부"
+    )
+    max_documents: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="반환할 최대 문서 수"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "summary": "3년 약정 기간 중 14개월 사용 후 중도 해지 시 위약금 문의",
+                    "include_documents": True,
+                    "max_documents": 5
+                }
+            ]
+        }
+    }
+
+
+class DirectSearchResponse(BaseModel):
+    """
+    직접 임베딩 검색 결과 응답
+
+    API 1: 질문 직접 임베딩하여 검색한 결과 확인용
+    """
+    original_summary: str = Field(
+        ...,
+        description="원본 상담 요약"
+    )
+    search_method: str = Field(
+        default="direct_embedding",
+        description="검색 방식"
+    )
+    total_results: int = Field(
+        ...,
+        description="검색된 문서 수"
+    )
+    documents: List[DocumentInfo] = Field(
+        default_factory=list,
+        description="검색된 참조 문서 목록"
+    )
+    processing_time_ms: Optional[float] = Field(
+        default=None,
+        description="처리 소요 시간 (밀리초)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "original_summary": "인터넷 해지 위약금 문의",
+                    "search_method": "direct_embedding",
+                    "total_results": 5,
+                    "documents": [],
+                    "processing_time_ms": 234.5
+                }
+            ]
+        }
+    }
+
+
+class KeywordGuideResponse(BaseModel):
+    """
+    핵심 키워드 가이드 응답
+
+    API 2, 3: 핵심 키워드 기반 간결 가이드 생성용
+    """
+    original_summary: str = Field(
+        ...,
+        description="원본 상담 요약"
+    )
+    search_method: str = Field(
+        ...,
+        description="검색 방식 (direct_embedding / keyword_extraction)"
+    )
+    extracted_keywords: Optional[str] = Field(
+        default=None,
+        description="추출된 검색 키워드 (keyword_extraction 방식에서만)"
+    )
+    documents: List[DocumentInfo] = Field(
+        default_factory=list,
+        description="검색된 참조 문서 목록"
+    )
+    keyword_guide: str = Field(
+        ...,
+        description="핵심 키워드 기반 간결 가이드",
+        json_schema_extra={"example": "• [요금제] 5G 스탠다드 월 69,000원. 데이터 무제한.\n• [위약금] 24개월 약정. 잔여개월 x 할인액."}
+    )
+    processing_time_ms: Optional[float] = Field(
+        default=None,
+        description="처리 소요 시간 (밀리초)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "original_summary": "인터넷 해지 위약금 문의",
+                    "search_method": "direct_embedding",
+                    "extracted_keywords": None,
+                    "documents": [],
+                    "keyword_guide": "• [위약금] 24개월 약정. 잔여개월 x 할인액. 최대 300,000원.",
+                    "processing_time_ms": 567.8
+                }
+            ]
+        }
+    }
+
+
+class DirectFullGuideResponse(BaseModel):
+    """
+    직접 임베딩 + 긴 가이드 응답
+
+    API 4: 직접 임베딩 검색 후 기존 문장형 가이드 생성용
+    """
+    original_summary: str = Field(
+        ...,
+        description="원본 상담 요약"
+    )
+    search_method: str = Field(
+        default="direct_embedding",
+        description="검색 방식"
+    )
+    documents: List[DocumentInfo] = Field(
+        default_factory=list,
+        description="검색된 참조 문서 목록"
+    )
+    response_guide: str = Field(
+        ...,
+        description="신입 상담원을 위한 대응방안 (문장형)",
+        json_schema_extra={"example": "고객님께 다음과 같이 안내해 주세요..."}
+    )
+    processing_time_ms: Optional[float] = Field(
+        default=None,
+        description="처리 소요 시간 (밀리초)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "original_summary": "인터넷 해지 위약금 문의",
+                    "search_method": "direct_embedding",
+                    "documents": [],
+                    "response_guide": "고객님께 다음과 같이 안내해 주세요...",
+                    "processing_time_ms": 789.0
+                }
+            ]
+        }
+    }

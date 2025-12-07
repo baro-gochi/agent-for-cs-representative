@@ -13,7 +13,12 @@ from app.models.schemas import (
     ExpertSearchRequest,
     ExpertSearchResponse,
     ErrorResponse,
-    QueueStatusResponse
+    QueueStatusResponse,
+    # 신규 비교용 API 모델
+    ComparisonRequest,
+    DirectSearchResponse,
+    KeywordGuideResponse,
+    DirectFullGuideResponse
 )
 
 __all__ = [
@@ -24,5 +29,10 @@ __all__ = [
     "ExpertSearchRequest",
     "ExpertSearchResponse",
     "ErrorResponse",
-    "QueueStatusResponse"
+    "QueueStatusResponse",
+    # 신규 비교용 API 모델
+    "ComparisonRequest",
+    "DirectSearchResponse",
+    "KeywordGuideResponse",
+    "DirectFullGuideResponse"
 ]

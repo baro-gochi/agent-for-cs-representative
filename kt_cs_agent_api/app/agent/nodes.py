@@ -6,9 +6,19 @@ LangGraph 에이전트 노드 정의
 이 모듈은 상담 Agent의 핵심 노드(Node)들을 정의합니다.
 각 노드는 파이프라인의 한 단계를 담당합니다:
 
+[기존 노드]
 1. analyzer_node: 상담 내용 분석 및 키워드 추출
 2. search_node: 벡터 DB 하이브리드 검색
-3. response_generator_node: 신입 상담원용 대응방안 생성
+3. response_generator_node: 신입 상담원용 대응방안 생성 (문장 형태)
+
+[추가 노드]
+4. direct_embedding_search_node: 요약문 직접 임베딩으로 유사 문서 검색
+   - 키워드 추출 과정 없이 요약문 자체를 임베딩하여 검색
+   - analyzer_node + search_node 대체 가능
+
+5. keyword_guide_node: 핵심 키워드 기반 간결 가이드 생성
+   - 긴 문장 대신 핵심만 짧게 나열
+   - 상담원이 자신의 말로 정제 가능하도록 요점 제공
 
 수정 가이드:
     - 프롬프트 수정: 각 노드 내 ChatPromptTemplate 수정
@@ -17,6 +27,7 @@ LangGraph 에이전트 노드 정의
 
 사용 예시:
     from app.agent.nodes import analyzer_node, search_node, response_generator_node
+    from app.agent.nodes import direct_embedding_search_node, keyword_guide_node
 """
 
 import logging
@@ -69,7 +80,7 @@ def analyzer_node(state: AgentState) -> dict:
         api_key=settings.OPENAI_API_KEY,
 
         temperature=0,
-        max_completion_tokens=150,
+        max_completion_tokens=50,
         reasoning_effort="minimal",  # gpt-5 계열 전용 옵션
         streaming=False
     )
@@ -77,13 +88,30 @@ def analyzer_node(state: AgentState) -> dict:
     # -----------------------------------------
     # [현재 사용] 키워드 추출 전용 프롬프트
     # -----------------------------------------
+    # prompt = ChatPromptTemplate.from_template("""
+    # 아래 텍스트에서 핵심 키워드 3-8개를 추출하세요.
+
+    # 출력 형식: 키워드1 키워드2 키워드3
+
+    # {summary}
+    # """)
     prompt = ChatPromptTemplate.from_template("""
-    아래 텍스트에서 핵심 키워드 3-8개를 추출하세요.
+    아래 텍스트에서 상담/약관 검색에 필요한 핵심 키워드를 3~8개 추출하세요.
 
-    출력 형식: 키워드1 키워드2 키워드3
+    규칙:
+    - 약관/계약/요금·서비스 문맥에서 중요한 단어만 선택하세요.
+    - 숫자 정보(개월 수, 약정 기간 등)는 반드시 포함하세요.
+    - “해지/위약금/반환금” 계열 키워드 우선 가중치
+    - 특정 상품명이나 결합상품은 텍스트에 명시되거나 의미상 필요한 경우에만 포함하세요.
+    - 일반 단어(내용, 상세, 문의, 방식, 설명 등)는 제거하세요.
+    - 출력은 공백으로 구분된 단어만 나열하세요.
+    - 출력 형식: 키워드1 키워드2 키워드3 ...
 
+    텍스트:
     {summary}
     """)
+
+
     
     # -----------------------------------------
     # [비활성화] 문서 라우팅 + 키워드 추출 프롬프트
@@ -261,11 +289,18 @@ def response_generator_node(state: AgentState) -> dict:
     # LLM 모델 초기화
     # -----------------------------------------
     llm = ChatOpenAI(
-        model=settings.RESPONSE_MODEL,
+        # model=settings.RESPONSE_MODEL,
+        # api_key=settings.OPENAI_API_KEY,
+
+        # temperature=0.2,  # 약간의 창의성 허용
+        # max_tokens=800,  # 충분한 길이의 답변 생성 허용
+        # streaming=False
+        model=settings.ANALYZER_MODEL,
         api_key=settings.OPENAI_API_KEY,
 
-        temperature=0.2,  # 약간의 창의성 허용
-        max_tokens=800,  # 충분한 길이의 답변 생성 허용
+        temperature=0,
+        # max_completion_tokens=150,
+        reasoning_effort="minimal",  # gpt-5 계열 전용 옵션
         streaming=False
     
     )
@@ -274,13 +309,34 @@ def response_generator_node(state: AgentState) -> dict:
     # 대응방안 생성 프롬프트
     # -----------------------------------------
     # [간결 버전] 현재 사용 중
+    # prompt = ChatPromptTemplate.from_template("""
+    # 신입 상담원 대응 가이드를 작성하세요.
+
+    # 고객 문의: {summary}
+    # 참고 자료: {context}
+
+    # 포함: 안내 멘트, 주의사항, 확인 필요 사항
+    # """)
     prompt = ChatPromptTemplate.from_template("""
     신입 상담원 대응 가이드를 작성하세요.
 
-    고객 문의: {summary}
-    참고 자료: {context}
+    고객 문의 요약: {summary}
+    관련 문서 내용: {context}
 
-    포함: 안내 멘트, 주의사항, 확인 필요 사항
+    요구 조건:
+    - 문맥 기반으로 필요한 범위까지만 간결하게 확장하세요.
+    - 고객 문의와 실제 문서 내용이 직접적으로 일치하지 않는 경우, “직접적 규정 없음”이라고 명시하고, 문서가 어떤 범위에서만 참고 가능한지 기술하세요.
+    - 각 문서의 해당 조항에서 핵심 문구를 1~2줄로 요약해 제시하세요.
+    - 문서에 없는 내용은 임의로 생성하지 마세요.
+    - 서로 다른 문서에서 추출된 규정은 섞지 말고 문서별로 구분해 설명하세요.
+    - 문장 톤은 상담원이 고객에게 설명하듯 부드럽고 명확하게 작성하세요.
+    - 각 항목은 3~5줄로 작성하세요.
+
+    출력 형식:
+    1. 안내 멘트
+    2. 주의사항
+    3. 확인 필요 사항
+    4. 다음 단계 안내
     """)
     
     # -----------------------------------------
@@ -318,3 +374,160 @@ def response_generator_node(state: AgentState) -> dict:
     logger.info(f"[ResponseGen] 완료 - 응답 길이: {len(response_guide)}자, 소요시간: {duration:.3f}초")
     
     return {"response_guide": response_guide}
+
+
+def direct_embedding_search_node(state: AgentState) -> dict:
+    """
+    [Node] 요약문 직접 임베딩 검색
+
+    기존 analyzer_node처럼 키워드를 추출하지 않고,
+    상담 요약문 자체를 임베딩하여 벡터 DB에서 유사 문서를 검색합니다.
+
+    입력 (state):
+        - summary: 상담 내용 요약 텍스트
+
+    출력 (dict):
+        - documents: 검색된 Document 리스트
+
+    장점:
+        - 키워드 추출 과정 생략으로 속도 향상
+        - 문맥 전체를 반영한 검색 가능
+        - LLM API 호출 비용 절감
+
+    Note:
+        similarity_search 내부에서 임베딩 모델을 통해
+        요약문을 벡터로 변환하여 유사도 검색을 수행합니다.
+    """
+    summary = state["summary"]
+
+    logger.info(f"[DirectSearch] 직접 임베딩 검색 시작: '{summary[:50]}...'")
+    start_time = time.perf_counter()
+
+    # DB 매니저 가져오기
+    db_manager = get_vector_db_manager()
+
+    # -----------------------------------------
+    # 요약문 직접 임베딩하여 유사도 검색 수행
+    # -----------------------------------------
+    try:
+        # summary 자체를 쿼리로 사용 (내부적으로 임베딩 처리됨)
+        docs = db_manager.similarity_search(summary, k=5)
+        logger.debug(f"[DirectSearch] 검색 결과: {len(docs)}개 문서")
+    except Exception as e:
+        logger.error(f"[DirectSearch] 검색 오류: {e}")
+        docs = []
+
+    # -----------------------------------------
+    # 중복 제거 (내용 앞 50자 기준)
+    # -----------------------------------------
+    unique_docs = []
+    seen_content = set()
+
+    for doc in docs:
+        content_hash = doc.page_content[:50]
+        if content_hash not in seen_content:
+            unique_docs.append(doc)
+            seen_content.add(content_hash)
+
+    # 소요 시간 측정
+    duration = time.perf_counter() - start_time
+    logger.info(f"[DirectSearch] 완료 - {len(unique_docs)}개 문서, 소요시간: {duration:.3f}초")
+
+    return {"documents": unique_docs}
+
+
+def keyword_guide_node(state: AgentState) -> dict:
+    """
+    [Node] 핵심 키워드 기반 간결 가이드 생성
+
+    벡터DB 검색 결과와 질문을 OpenAI API에 보내
+    상담원에게 필요한 핵심만 짧게 제시합니다.
+
+    기존 response_generator_node가 긴 문장 형태의 가이드를 생성했다면,
+    이 노드는 핵심 요점만 한 줄씩 제시하여 상담원이 자신의 말로
+    정제할 수 있도록 합니다.
+
+    입력 (state):
+        - summary: 원본 상담 요약
+        - documents: 검색된 문서 리스트
+
+    출력 (dict):
+        - keyword_guide: 핵심 키워드/요점 리스트 텍스트
+
+    출력 예시:
+        기존: "통신사 요금은 ~~가 있고 ~~가 있고, ~~가 있습니다!"
+        새로운: "통신사 요금 ~~. ~~. ~~."
+
+    사용 모델:
+        - settings.ANALYZER_MODEL (빠른 응답)
+    """
+    summary = state["summary"]
+    documents = state["documents"]
+
+    logger.info(f"[KeywordGuide] 핵심 가이드 생성 시작 - 참조 문서: {len(documents)}개")
+    start_time = time.perf_counter()
+
+    # -----------------------------------------
+    # 컨텍스트 구성 (검색된 문서 내용 통합)
+    # -----------------------------------------
+    context_parts = []
+    for i, doc in enumerate(documents):
+        source_name = doc.metadata.get("source", "Unknown").split("/")[-1]
+        page = doc.metadata.get("page", 0) + 1
+        context_parts.append(
+            f"[문서 {i+1}] {source_name} (p.{page})\n{doc.page_content}"
+        )
+
+    context = "\n\n".join(context_parts) if context_parts else "참고 문서 없음"
+
+    # -----------------------------------------
+    # LLM 모델 초기화
+    # -----------------------------------------
+    llm = ChatOpenAI(
+        model=settings.ANALYZER_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+        temperature=0,
+        # max_completion_tokens=300,
+        reasoning_effort="minimal",
+        streaming=False
+    )
+
+    # -----------------------------------------
+    # 핵심 키워드 가이드 프롬프트
+    # -----------------------------------------
+    prompt = ChatPromptTemplate.from_template("""
+상담원에게 필요한 핵심만 짧게 제시하세요.
+
+고객 문의: {summary}
+참고 문서: {context}
+
+규칙:
+- 긴 문장 금지. 핵심 키워드/요점만 나열
+- 대화 순서에 맞게 정보 배치
+- 상담원이 자신의 말로 정제할 수 있도록 핵심만 제공
+- 각 항목은 한 줄 이내로 작성
+- 문서에 없는 내용은 작성 금지
+
+출력 형식:
+• [주제] 핵심내용1. 핵심내용2. 핵심내용3.
+• [다음주제] 핵심내용1. 핵심내용2.
+...
+
+예시:
+• [요금제] 5G 스탠다드 월 69,000원. 데이터 무제한. 통화 무제한.
+• [위약금] 24개월 약정. 잔여개월 x 할인액. 최대 300,000원.
+• [확인사항] 가입일 확인 필요. 결합상품 여부 체크.
+""")
+
+    # 체인 실행
+    chain = prompt | llm | StrOutputParser()
+    keyword_guide = chain.invoke({
+        "summary": summary,
+        "context": context
+    })
+
+    # 소요 시간 측정
+    duration = time.perf_counter() - start_time
+    logger.info(f"[KeywordGuide] 완료 - 응답 길이: {len(keyword_guide)}자, 소요시간: {duration:.3f}초")
+
+    return {"keyword_guide": keyword_guide}

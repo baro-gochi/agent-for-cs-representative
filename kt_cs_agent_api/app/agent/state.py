@@ -21,32 +21,39 @@ from langchain_core.documents import Document
 class AgentState(TypedDict):
     """
     상담원 Agent의 상태 스키마
-    
+
     LangGraph 워크플로우에서 노드 간 전달되는 데이터를 정의합니다.
-    
+
     Attributes:
-        summary (str): 
+        summary (str):
             [입력] 상담 내용 요약
             사용자로부터 입력받은 원본 상담 요약 텍스트
-        
-        target_doc_name (str): 
+
+        target_doc_name (str):
             [중간] 선택된 문서 별칭
             analyzer_node에서 결정된 검색 대상 문서
             문서를 특정할 수 없으면 "없음"
-        
-        search_query (str): 
+
+        search_query (str):
             [중간] 추출된 검색 키워드
             analyzer_node에서 추출된 핵심 키워드
-        
-        documents (List[Document]): 
+
+        documents (List[Document]):
             [중간] 검색된 문서 리스트
-            search_node에서 벡터 DB로부터 검색된 관련 문서들
-        
-        response_guide (str): 
+            search_node 또는 direct_embedding_search_node에서 검색된 관련 문서들
+
+        response_guide (str):
             [출력] 신입 상담원용 대응방안
-            response_generator_node에서 생성된 최종 가이드 텍스트
-    
-    워크플로우:
+            response_generator_node에서 생성된 최종 가이드 텍스트 (문장 형태)
+
+        keyword_guide (str):
+            [출력] 핵심 키워드 기반 간결 가이드
+            keyword_guide_node에서 생성된 핵심 요점 텍스트
+            예: "• [요금제] 5G 스탠다드 월 69,000원. 데이터 무제한."
+
+    워크플로우 옵션:
+
+    [기존] 키워드 추출 → 검색 → 문장 가이드
         summary (입력)
             ↓
         [analyzer_node]
@@ -60,6 +67,17 @@ class AgentState(TypedDict):
         [response_generator_node]
             ↓
         response_guide (출력)
+
+    [대안] 직접 임베딩 검색 → 핵심 가이드
+        summary (입력)
+            ↓
+        [direct_embedding_search_node]
+            ↓
+        documents (중간)
+            ↓
+        [keyword_guide_node]
+            ↓
+        keyword_guide (출력)
     """
     
     # [입력] 상담 내용 요약
@@ -76,6 +94,9 @@ class AgentState(TypedDict):
     
     # [출력] 신입 상담원용 대응방안
     response_guide: str
+
+    # [출력] 핵심 키워드 기반 간결 가이드 (keyword_guide_node용)
+    keyword_guide: str
 
 
 # ==========================================
@@ -103,5 +124,6 @@ def create_initial_state(summary: str) -> dict:
         "target_doc_name": "",
         "search_query": "",
         "documents": [],
-        "response_guide": ""
+        "response_guide": "",
+        "keyword_guide": ""
     }
