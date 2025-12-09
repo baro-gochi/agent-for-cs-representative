@@ -316,7 +316,6 @@ async def direct_keyword_guide(request: ComparisonRequest):
 
             # L1 캐시에 저장
             l1_data = cache.build_l1_response(
-                extracted_keywords=None,
                 documents=raw_documents if raw_documents else [],
                 keyword_guide=keyword_guide
             )
