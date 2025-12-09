@@ -82,11 +82,14 @@ async def normalize_query_with_llm(query: str) -> str:
         str: 정규화된 질문
     """
     llm = ChatOpenAI(
-        model=settings.NORMALIZER_MODEL,
+        model=settings.ANALYZER_MODEL,
         api_key=settings.OPENAI_API_KEY,
         temperature=0,
-        max_tokens=100,
+        max_completion_tokens=100,
+        reasoning_effort="minimal",  # gpt-5 계열 전용 옵션
+        streaming=False
     )
+    
 
     prompt = ChatPromptTemplate.from_template("""
 아래 고객 문의를 검색/캐싱용 정규화된 형태로 변환하세요.
