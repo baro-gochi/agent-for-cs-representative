@@ -191,12 +191,20 @@ async def direct_keyword_guide(request: ComparisonRequest):
 
             processing_time_ms = (time.perf_counter() - start_time) * 1000
 
+            # keyword_guide는 이제 JSON 구조
+            keyword_guide = result.get("keyword_guide", {})
+            # 폴백: 문자열인 경우 기본 구조로 변환
+            if isinstance(keyword_guide, str):
+                keyword_guide = {
+                    "guide_items": [{"topic": "응답", "points": [keyword_guide]}]
+                }
+
             response = KeywordGuideResponse(
                 original_summary=request.summary,
                 search_method="direct_embedding",
                 extracted_keywords=None,  # 직접 임베딩은 키워드 추출 없음
                 documents=documents,
-                keyword_guide=result.get("keyword_guide", ""),
+                keyword_guide=keyword_guide,
                 processing_time_ms=round(processing_time_ms, 2)
             )
 
@@ -265,12 +273,20 @@ async def keyword_extraction_guide(request: ComparisonRequest):
 
             processing_time_ms = (time.perf_counter() - start_time) * 1000
 
+            # keyword_guide는 이제 JSON 구조
+            keyword_guide = result.get("keyword_guide", {})
+            # 폴백: 문자열인 경우 기본 구조로 변환
+            if isinstance(keyword_guide, str):
+                keyword_guide = {
+                    "guide_items": [{"topic": "응답", "points": [keyword_guide]}]
+                }
+
             response = KeywordGuideResponse(
                 original_summary=request.summary,
                 search_method="keyword_extraction",
                 extracted_keywords=result.get("search_query", ""),
                 documents=documents,
-                keyword_guide=result.get("keyword_guide", ""),
+                keyword_guide=keyword_guide,
                 processing_time_ms=round(processing_time_ms, 2)
             )
 
@@ -338,11 +354,22 @@ async def direct_full_guide(request: ComparisonRequest):
 
             processing_time_ms = (time.perf_counter() - start_time) * 1000
 
+            # response_guide는 이제 JSON 구조
+            response_guide = result.get("response_guide", {})
+            # 폴백: 문자열인 경우 기본 구조로 변환
+            if isinstance(response_guide, str):
+                response_guide = {
+                    "announcement": {"title": "안내 멘트", "items": [response_guide]},
+                    "cautions": {"title": "주의사항", "items": []},
+                    "check_required": {"title": "확인 필요 사항", "items": []},
+                    "next_steps": {"title": "다음 단계 안내", "items": []}
+                }
+
             response = DirectFullGuideResponse(
                 original_summary=request.summary,
                 search_method="direct_embedding",
                 documents=documents,
-                response_guide=result.get("response_guide", ""),
+                response_guide=response_guide,
                 processing_time_ms=round(processing_time_ms, 2)
             )
 

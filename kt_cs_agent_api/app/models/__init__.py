@@ -14,7 +14,12 @@ from app.models.schemas import (
     ExpertSearchResponse,
     ErrorResponse,
     QueueStatusResponse,
-    # 신규 비교용 API 모델
+    # JSON 구조화된 가이드 모델
+    GuideSection,
+    StructuredResponseGuide,
+    KeywordGuideItem,
+    StructuredKeywordGuide,
+    # 비교용 API 모델
     ComparisonRequest,
     DirectSearchResponse,
     KeywordGuideResponse,
@@ -30,7 +35,12 @@ __all__ = [
     "ExpertSearchResponse",
     "ErrorResponse",
     "QueueStatusResponse",
-    # 신규 비교용 API 모델
+    # JSON 구조화된 가이드 모델
+    "GuideSection",
+    "StructuredResponseGuide",
+    "KeywordGuideItem",
+    "StructuredKeywordGuide",
+    # 비교용 API 모델
     "ComparisonRequest",
     "DirectSearchResponse",
     "KeywordGuideResponse",

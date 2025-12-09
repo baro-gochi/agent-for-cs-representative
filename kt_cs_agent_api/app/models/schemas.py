@@ -118,15 +118,16 @@ class ConsultationRequest(BaseModel):
 class ConsultationResponse(BaseModel):
     """
     신입 상담원용 상담 응답
-    
+
     상담 요청에 대한 전체 처리 결과를 담습니다.
+    response_guide는 JSON 구조화된 데이터로, 프론트엔드에서 자유롭게 렌더링할 수 있습니다.
     """
     # 입력 정보
     original_summary: str = Field(
         ...,
         description="원본 상담 요약"
     )
-    
+
     # 분석 결과
     extracted_keywords: str = Field(
         ...,
@@ -138,20 +139,37 @@ class ConsultationResponse(BaseModel):
         description="선택된 대상 문서",
         json_schema_extra={"example": "인터넷이용약관"}
     )
-    
+
     # 검색 결과
     documents: List[DocumentInfo] = Field(
         default_factory=list,
         description="검색된 참조 문서 목록"
     )
-    
-    # 대응방안
-    response_guide: str = Field(
+
+    # 대응방안 (JSON 구조화)
+    response_guide: Dict[str, Any] = Field(
         ...,
-        description="신입 상담원을 위한 대응방안",
-        json_schema_extra={"example": "고객님께 다음과 같이 안내해 주세요..."}
+        description="신입 상담원을 위한 대응방안 (JSON 구조화)",
+        json_schema_extra={"example": {
+            "announcement": {
+                "title": "안내 멘트",
+                "items": ["고객님, 약정 해지 관련 안내드리겠습니다."]
+            },
+            "cautions": {
+                "title": "주의사항",
+                "items": ["중도 해지 시 위약금이 발생합니다."]
+            },
+            "check_required": {
+                "title": "확인 필요 사항",
+                "items": ["정확한 가입일자 확인"]
+            },
+            "next_steps": {
+                "title": "다음 단계 안내",
+                "items": ["해지 신청서 작성 안내"]
+            }
+        }}
     )
-    
+
     # 메타 정보
     processing_time_ms: Optional[float] = Field(
         default=None,
@@ -173,7 +191,36 @@ class ConsultationResponse(BaseModel):
                             "score": 0.234
                         }
                     ],
-                    "response_guide": "고객님께 다음과 같이 안내해 주세요...",
+                    "response_guide": {
+                        "announcement": {
+                            "title": "안내 멘트",
+                            "items": [
+                                "고객님, 약정 해지 관련 안내드리겠습니다.",
+                                "현재 사용 중이신 상품은 24개월 약정 상품입니다."
+                            ]
+                        },
+                        "cautions": {
+                            "title": "주의사항",
+                            "items": [
+                                "중도 해지 시 위약금이 발생합니다.",
+                                "위약금은 잔여 약정 기간에 따라 산정됩니다."
+                            ]
+                        },
+                        "check_required": {
+                            "title": "확인 필요 사항",
+                            "items": [
+                                "정확한 가입일자 확인",
+                                "결합상품 여부 확인"
+                            ]
+                        },
+                        "next_steps": {
+                            "title": "다음 단계 안내",
+                            "items": [
+                                "해지 신청서 작성 안내",
+                                "위약금 정산 절차 안내"
+                            ]
+                        }
+                    },
                     "processing_time_ms": 1234.5
                 }
             ]
@@ -331,6 +378,145 @@ class QueueStatusResponse(BaseModel):
 
 
 # ==========================================
+# [신규] JSON 구조화된 가이드 모델
+# ==========================================
+
+class GuideSection(BaseModel):
+    """
+    가이드 섹션 모델
+
+    각 섹션은 제목과 항목 리스트로 구성됩니다.
+    프론트엔드에서 자유롭게 스타일링할 수 있도록 구조화되어 있습니다.
+    """
+    title: str = Field(
+        ...,
+        description="섹션 제목",
+        json_schema_extra={"example": "안내 멘트"}
+    )
+    items: List[str] = Field(
+        default_factory=list,
+        description="섹션 내 항목 리스트",
+        json_schema_extra={"example": ["고객님, 약정 해지 관련 안내드리겠습니다.", "현재 사용 중이신 상품은 24개월 약정 상품입니다."]}
+    )
+
+
+class StructuredResponseGuide(BaseModel):
+    """
+    구조화된 대응방안 가이드 (response_generator_node용)
+
+    신입 상담원용 대응방안을 JSON 구조로 반환합니다.
+    프론트엔드에서 각 섹션별로 자유롭게 렌더링할 수 있습니다.
+    """
+    announcement: GuideSection = Field(
+        ...,
+        description="안내 멘트 섹션"
+    )
+    cautions: GuideSection = Field(
+        ...,
+        description="주의사항 섹션"
+    )
+    check_required: GuideSection = Field(
+        ...,
+        description="확인 필요 사항 섹션"
+    )
+    next_steps: GuideSection = Field(
+        ...,
+        description="다음 단계 안내 섹션"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "announcement": {
+                        "title": "안내 멘트",
+                        "items": [
+                            "고객님, 약정 해지 관련 안내드리겠습니다.",
+                            "현재 사용 중이신 상품은 24개월 약정 상품입니다."
+                        ]
+                    },
+                    "cautions": {
+                        "title": "주의사항",
+                        "items": [
+                            "중도 해지 시 위약금이 발생합니다.",
+                            "위약금은 잔여 약정 기간에 따라 산정됩니다."
+                        ]
+                    },
+                    "check_required": {
+                        "title": "확인 필요 사항",
+                        "items": [
+                            "정확한 가입일자 확인",
+                            "결합상품 여부 확인"
+                        ]
+                    },
+                    "next_steps": {
+                        "title": "다음 단계 안내",
+                        "items": [
+                            "해지 신청서 작성 안내",
+                            "위약금 정산 절차 안내"
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+
+
+class KeywordGuideItem(BaseModel):
+    """
+    핵심 키워드 가이드 항목 모델
+
+    각 항목은 주제와 핵심 포인트 리스트로 구성됩니다.
+    """
+    topic: str = Field(
+        ...,
+        description="주제/카테고리",
+        json_schema_extra={"example": "요금제"}
+    )
+    points: List[str] = Field(
+        default_factory=list,
+        description="핵심 포인트 리스트",
+        json_schema_extra={"example": ["5G 스탠다드 월 69,000원", "데이터 무제한", "통화 무제한"]}
+    )
+
+
+class StructuredKeywordGuide(BaseModel):
+    """
+    구조화된 핵심 키워드 가이드 (keyword_guide_node용)
+
+    상담원에게 필요한 핵심만 짧게 제시합니다.
+    프론트엔드에서 각 항목을 태그, 칩, 카드 등으로 렌더링할 수 있습니다.
+    """
+    guide_items: List[KeywordGuideItem] = Field(
+        default_factory=list,
+        description="핵심 가이드 항목 리스트"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "guide_items": [
+                        {
+                            "topic": "요금제",
+                            "points": ["5G 스탠다드 월 69,000원", "데이터 무제한", "통화 무제한"]
+                        },
+                        {
+                            "topic": "위약금",
+                            "points": ["24개월 약정", "잔여개월 x 할인액", "최대 300,000원"]
+                        },
+                        {
+                            "topic": "확인사항",
+                            "points": ["가입일 확인 필요", "결합상품 여부 체크"]
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+
+# ==========================================
 # [신규] 비교용 API 모델
 # ==========================================
 
@@ -416,6 +602,7 @@ class KeywordGuideResponse(BaseModel):
     핵심 키워드 가이드 응답
 
     API 2, 3: 핵심 키워드 기반 간결 가이드 생성용
+    keyword_guide는 JSON 구조화된 데이터로, 프론트엔드에서 자유롭게 렌더링할 수 있습니다.
     """
     original_summary: str = Field(
         ...,
@@ -433,10 +620,15 @@ class KeywordGuideResponse(BaseModel):
         default_factory=list,
         description="검색된 참조 문서 목록"
     )
-    keyword_guide: str = Field(
+    keyword_guide: Dict[str, Any] = Field(
         ...,
-        description="핵심 키워드 기반 간결 가이드",
-        json_schema_extra={"example": "• [요금제] 5G 스탠다드 월 69,000원. 데이터 무제한.\n• [위약금] 24개월 약정. 잔여개월 x 할인액."}
+        description="핵심 키워드 기반 간결 가이드 (JSON 구조화)",
+        json_schema_extra={"example": {
+            "guide_items": [
+                {"topic": "요금제", "points": ["5G 스탠다드 월 69,000원", "데이터 무제한"]},
+                {"topic": "위약금", "points": ["24개월 약정", "잔여개월 x 할인액"]}
+            ]
+        }}
     )
     processing_time_ms: Optional[float] = Field(
         default=None,
@@ -451,7 +643,12 @@ class KeywordGuideResponse(BaseModel):
                     "search_method": "direct_embedding",
                     "extracted_keywords": None,
                     "documents": [],
-                    "keyword_guide": "• [위약금] 24개월 약정. 잔여개월 x 할인액. 최대 300,000원.",
+                    "keyword_guide": {
+                        "guide_items": [
+                            {"topic": "위약금", "points": ["24개월 약정", "잔여개월 x 할인액", "최대 300,000원"]},
+                            {"topic": "확인사항", "points": ["가입일 확인 필요", "결합상품 여부 체크"]}
+                        ]
+                    },
                     "processing_time_ms": 567.8
                 }
             ]
@@ -463,7 +660,8 @@ class DirectFullGuideResponse(BaseModel):
     """
     직접 임베딩 + 긴 가이드 응답
 
-    API 4: 직접 임베딩 검색 후 기존 문장형 가이드 생성용
+    API 4: 직접 임베딩 검색 후 구조화된 가이드 생성용
+    response_guide는 JSON 구조화된 데이터로, 프론트엔드에서 자유롭게 렌더링할 수 있습니다.
     """
     original_summary: str = Field(
         ...,
@@ -477,10 +675,15 @@ class DirectFullGuideResponse(BaseModel):
         default_factory=list,
         description="검색된 참조 문서 목록"
     )
-    response_guide: str = Field(
+    response_guide: Dict[str, Any] = Field(
         ...,
-        description="신입 상담원을 위한 대응방안 (문장형)",
-        json_schema_extra={"example": "고객님께 다음과 같이 안내해 주세요..."}
+        description="신입 상담원을 위한 대응방안 (JSON 구조화)",
+        json_schema_extra={"example": {
+            "announcement": {"title": "안내 멘트", "items": ["고객님, 안내드리겠습니다."]},
+            "cautions": {"title": "주의사항", "items": ["위약금이 발생합니다."]},
+            "check_required": {"title": "확인 필요 사항", "items": ["가입일 확인"]},
+            "next_steps": {"title": "다음 단계 안내", "items": ["해지 신청서 작성"]}
+        }}
     )
     processing_time_ms: Optional[float] = Field(
         default=None,
@@ -494,7 +697,24 @@ class DirectFullGuideResponse(BaseModel):
                     "original_summary": "인터넷 해지 위약금 문의",
                     "search_method": "direct_embedding",
                     "documents": [],
-                    "response_guide": "고객님께 다음과 같이 안내해 주세요...",
+                    "response_guide": {
+                        "announcement": {
+                            "title": "안내 멘트",
+                            "items": ["고객님, 약정 해지 관련 안내드리겠습니다."]
+                        },
+                        "cautions": {
+                            "title": "주의사항",
+                            "items": ["중도 해지 시 위약금이 발생합니다."]
+                        },
+                        "check_required": {
+                            "title": "확인 필요 사항",
+                            "items": ["정확한 가입일자 확인"]
+                        },
+                        "next_steps": {
+                            "title": "다음 단계 안내",
+                            "items": ["해지 신청서 작성 안내"]
+                        }
+                    },
                     "processing_time_ms": 789.0
                 }
             ]

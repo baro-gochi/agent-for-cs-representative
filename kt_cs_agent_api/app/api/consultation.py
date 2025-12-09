@@ -134,13 +134,23 @@ async def assist_consultation(request: ConsultationRequest):
             # 처리 시간 계산
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             
-            # 응답 생성
+            # 응답 생성 (response_guide는 이제 JSON 구조)
+            response_guide = result.get("response_guide", {})
+            # 폴백: 문자열인 경우 기본 구조로 변환
+            if isinstance(response_guide, str):
+                response_guide = {
+                    "announcement": {"title": "안내 멘트", "items": [response_guide]},
+                    "cautions": {"title": "주의사항", "items": []},
+                    "check_required": {"title": "확인 필요 사항", "items": []},
+                    "next_steps": {"title": "다음 단계 안내", "items": []}
+                }
+
             response = ConsultationResponse(
                 original_summary=request.summary,
                 extracted_keywords=result.get("search_query", ""),
                 target_document=result.get("target_doc_name", "없음"),
                 documents=documents,
-                response_guide=result.get("response_guide", ""),
+                response_guide=response_guide,
                 processing_time_ms=round(processing_time_ms, 2)
             )
             

@@ -30,6 +30,7 @@ LangGraph 에이전트 노드 정의
     from app.agent.nodes import direct_embedding_search_node, keyword_guide_node
 """
 
+import json
 import logging
 import time
 from typing import List
@@ -37,7 +38,7 @@ from typing import List
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 
 from app.agent.state import AgentState
 from app.config import settings
@@ -306,73 +307,89 @@ def response_generator_node(state: AgentState) -> dict:
     )
     
     # -----------------------------------------
-    # 대응방안 생성 프롬프트
+    # 대응방안 생성 프롬프트 (JSON 출력)
     # -----------------------------------------
-    # [간결 버전] 현재 사용 중
-    # prompt = ChatPromptTemplate.from_template("""
-    # 신입 상담원 대응 가이드를 작성하세요.
-
-    # 고객 문의: {summary}
-    # 참고 자료: {context}
-
-    # 포함: 안내 멘트, 주의사항, 확인 필요 사항
-    # """)
+    # 프론트엔드에서 자유롭게 렌더링할 수 있도록 JSON 구조로 출력
     prompt = ChatPromptTemplate.from_template("""
-    신입 상담원 대응 가이드를 작성하세요.
+신입 상담원 대응 가이드를 JSON 형식으로 작성하세요.
 
-    고객 문의 요약: {summary}
-    관련 문서 내용: {context}
+고객 문의 요약: {summary}
+관련 문서 내용: {context}
 
-    요구 조건:
-    - 문맥 기반으로 필요한 범위까지만 간결하게 확장하세요.
-    - 고객 문의와 실제 문서 내용이 직접적으로 일치하지 않는 경우, “직접적 규정 없음”이라고 명시하고, 문서가 어떤 범위에서만 참고 가능한지 기술하세요.
-    - 각 문서의 해당 조항에서 핵심 문구를 1~2줄로 요약해 제시하세요.
-    - 문서에 없는 내용은 임의로 생성하지 마세요.
-    - 서로 다른 문서에서 추출된 규정은 섞지 말고 문서별로 구분해 설명하세요.
-    - 문장 톤은 상담원이 고객에게 설명하듯 부드럽고 명확하게 작성하세요.
-    - 각 항목은 3~5줄로 작성하세요.
+요구 조건:
+- 문맥 기반으로 필요한 범위까지만 간결하게 확장하세요.
+- 고객 문의와 실제 문서 내용이 직접적으로 일치하지 않는 경우, "직접적 규정 없음"이라고 명시하고, 문서가 어떤 범위에서만 참고 가능한지 기술하세요.
+- 각 문서의 해당 조항에서 핵심 문구를 1~2줄로 요약해 제시하세요.
+- 문서에 없는 내용은 임의로 생성하지 마세요.
+- 서로 다른 문서에서 추출된 규정은 섞지 말고 문서별로 구분해 설명하세요.
+- 문장 톤은 상담원이 고객에게 설명하듯 부드럽고 명확하게 작성하세요.
+- 각 섹션의 items 배열에는 2~5개의 항목을 포함하세요.
 
-    출력 형식:
-    1. 안내 멘트
-    2. 주의사항
-    3. 확인 필요 사항
-    4. 다음 단계 안내
-    """)
+반드시 아래 JSON 형식으로만 출력하세요. 다른 텍스트는 포함하지 마세요:
+{{
+    "announcement": {{
+        "title": "안내 멘트",
+        "items": ["고객에게 안내할 첫 번째 멘트", "두 번째 멘트", ...]
+    }},
+    "cautions": {{
+        "title": "주의사항",
+        "items": ["첫 번째 주의사항", "두 번째 주의사항", ...]
+    }},
+    "check_required": {{
+        "title": "확인 필요 사항",
+        "items": ["확인할 첫 번째 사항", "두 번째 사항", ...]
+    }},
+    "next_steps": {{
+        "title": "다음 단계 안내",
+        "items": ["다음 단계 첫 번째", "두 번째", ...]
+    }}
+}}
+""")
     
-    # -----------------------------------------
-    # [상세 버전] 필요시 활성화
-    # -----------------------------------------
-    # prompt = ChatPromptTemplate.from_template("""
-    # 당신은 KT 고객센터의 시니어 상담원입니다.
-    # 신입 상담원이 고객 문의에 적절히 대응할 수 있도록 
-    # 친절하고 명확한 가이드를 제공해주세요.
-    # 
-    # === 고객 상담 요약 ===
-    # {summary}
-    # 
-    # === 관련 내부 규정/약관 ===
-    # {context}
-    # 
-    # === 작성 지침 ===
-    # 1. 신입 상담원도 쉽게 이해할 수 있는 언어로 작성
-    # 2. 고객에게 직접 안내할 수 있는 멘트 예시 포함
-    # 3. 주의사항이나 예외 케이스가 있다면 명시
-    # 4. 필요시 추가 확인이 필요한 사항 안내
-    # 
-    # === 대응방안 작성 ===
-    # """)
-    
-    # 체인 실행
+    # 체인 실행 (JSON 파싱)
     chain = prompt | llm | StrOutputParser()
-    response_guide = chain.invoke({
+    raw_response = chain.invoke({
         "summary": summary,
         "context": context
     })
-    
+
+    # JSON 파싱 시도
+    try:
+        # JSON 블록 추출 (```json ... ``` 형태 처리)
+        json_str = raw_response.strip()
+        if json_str.startswith("```"):
+            # 코드 블록 제거
+            lines = json_str.split("\n")
+            json_str = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        response_guide = json.loads(json_str)
+        logger.debug(f"[ResponseGen] JSON 파싱 성공")
+    except json.JSONDecodeError as e:
+        # 파싱 실패 시 기본 구조로 폴백
+        logger.warning(f"[ResponseGen] JSON 파싱 실패, 폴백 구조 사용: {e}")
+        response_guide = {
+            "announcement": {
+                "title": "안내 멘트",
+                "items": [raw_response[:500] if len(raw_response) > 500 else raw_response]
+            },
+            "cautions": {
+                "title": "주의사항",
+                "items": ["파싱 오류로 인해 원본 응답을 안내 멘트에 포함했습니다."]
+            },
+            "check_required": {
+                "title": "확인 필요 사항",
+                "items": ["담당자 확인 필요"]
+            },
+            "next_steps": {
+                "title": "다음 단계 안내",
+                "items": ["상위 담당자에게 문의"]
+            }
+        }
+
     # 소요 시간 측정
     duration = time.perf_counter() - start_time
-    logger.info(f"[ResponseGen] 완료 - 응답 길이: {len(response_guide)}자, 소요시간: {duration:.3f}초")
-    
+    logger.info(f"[ResponseGen] 완료 - 소요시간: {duration:.3f}초")
+
     return {"response_guide": response_guide}
 
 
@@ -452,11 +469,15 @@ def keyword_guide_node(state: AgentState) -> dict:
         - documents: 검색된 문서 리스트
 
     출력 (dict):
-        - keyword_guide: 핵심 키워드/요점 리스트 텍스트
+        - keyword_guide: JSON 구조화된 핵심 키워드/요점 데이터
 
-    출력 예시:
-        기존: "통신사 요금은 ~~가 있고 ~~가 있고, ~~가 있습니다!"
-        새로운: "통신사 요금 ~~. ~~. ~~."
+    출력 예시 (JSON):
+        {
+            "guide_items": [
+                {"topic": "요금제", "points": ["5G 스탠다드 월 69,000원", "데이터 무제한"]},
+                {"topic": "위약금", "points": ["24개월 약정", "잔여개월 x 할인액"]}
+            ]
+        }
 
     사용 모델:
         - settings.ANALYZER_MODEL (빠른 응답)
@@ -493,10 +514,41 @@ def keyword_guide_node(state: AgentState) -> dict:
     )
 
     # -----------------------------------------
-    # 핵심 키워드 가이드 프롬프트
+    # 핵심 키워드 가이드 프롬프트 (JSON 출력)
     # -----------------------------------------
+#     prompt = ChatPromptTemplate.from_template("""
+# 상담원에게 필요한 사실 기반 핵심 정보만 JSON으로 정리하세요.
+
+# 고객 문의: {summary}
+# 참고 문서: {context}
+
+# 핵심 규칙:
+# 1) topic은 '문서 안에 실제 정량 데이터(금액·수치·산정식·조건)가 존재하는 경우에만' 생성한다.
+#    - 지시문/절차/설명만 있는 경우 topic 생성 금지
+#    - 예: "위약금 설명 필요" → 금액/산정식 없음 → topic 생성 금지
+
+# 2) points는 반드시 문서에 있는 정량적이고 사실 기반 정보만 포함한다.
+#    - 금액, 수식, 조건, 여부, 항목 등
+#    - 지시/행동 표현 금지 (예: "~안내", "~설명", "~제시")
+
+# 3) 문서에 정량 데이터가 전혀 없으면 guide_items를 아예 생성하지 않거나,
+#    정량 정보가 있는 topic만 남긴다.
+
+# 4) JSON 외 텍스트는 출력 금지.
+
+# 출력 형식:
+# {{
+#     "guide_items": [
+#         {{
+#             "topic": "주제1",
+#             "points": ["정량 사실1", "정량 사실2"]
+#         }}
+#     ]
+# }}
+
+#     """)
     prompt = ChatPromptTemplate.from_template("""
-상담원에게 필요한 핵심만 짧게 제시하세요.
+상담원에게 필요한 핵심만 JSON 형식으로 제시하세요.
 
 고객 문의: {summary}
 참고 문서: {context}
@@ -504,30 +556,66 @@ def keyword_guide_node(state: AgentState) -> dict:
 규칙:
 - 긴 문장 금지. 핵심 키워드/요점만 나열
 - 대화 순서에 맞게 정보 배치
-- 상담원이 자신의 말로 정제할 수 있도록 핵심만 제공
-- 각 항목은 한 줄 이내로 작성
+- 상담원이 자신의 말로 정제할 수 있도록 필요 데이터 제공
+- 각 points 항목은 짧은 문구로 작성 (10단어 이내)
 - 문서에 없는 내용은 작성 금지
+- 2~6개의 주제를 생성
 
-출력 형식:
-• [주제] 핵심내용1. 핵심내용2. 핵심내용3.
-• [다음주제] 핵심내용1. 핵심내용2.
-...
+반드시 아래 JSON 형식으로만 출력하세요. 다른 텍스트는 포함하지 마세요:
+{{
+    "guide_items": [
+        {{
+            "topic": "주제1",
+            "points": ["핵심내용1", "핵심내용2", "핵심내용3"]
+        }},
+        {{
+            "topic": "주제2",
+            "points": ["핵심내용1", "핵심내용2"]
+        }}
+    ]
+}}
 
-예시:
-• [요금제] 5G 스탠다드 월 69,000원. 데이터 무제한. 통화 무제한.
-• [위약금] 24개월 약정. 잔여개월 x 할인액. 최대 300,000원.
-• [확인사항] 가입일 확인 필요. 결합상품 여부 체크.
+예시 출력:
+{{
+    "guide_items": [
+        {{"topic": "요금제", "points": ["5G 스탠다드 월 69,000원", "데이터 무제한", "통화 무제한"]}},
+        {{"topic": "위약금", "points": ["24개월 약정", "잔여개월 x 할인액", "최대 300,000원"]}},
+        {{"topic": "확인사항", "points": ["가입일 확인 필요", "결합상품 여부 체크"]}}
+    ]
+}}
 """)
 
-    # 체인 실행
+    # 체인 실행 (JSON 파싱)
     chain = prompt | llm | StrOutputParser()
-    keyword_guide = chain.invoke({
+    raw_response = chain.invoke({
         "summary": summary,
         "context": context
     })
 
+    # JSON 파싱 시도
+    try:
+        # JSON 블록 추출 (```json ... ``` 형태 처리)
+        json_str = raw_response.strip()
+        if json_str.startswith("```"):
+            lines = json_str.split("\n")
+            json_str = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        keyword_guide = json.loads(json_str)
+        logger.debug(f"[KeywordGuide] JSON 파싱 성공")
+    except json.JSONDecodeError as e:
+        # 파싱 실패 시 기본 구조로 폴백
+        logger.warning(f"[KeywordGuide] JSON 파싱 실패, 폴백 구조 사용: {e}")
+        keyword_guide = {
+            "guide_items": [
+                {
+                    "topic": "응답 내용",
+                    "points": [raw_response[:200] if len(raw_response) > 200 else raw_response]
+                }
+            ]
+        }
+
     # 소요 시간 측정
     duration = time.perf_counter() - start_time
-    logger.info(f"[KeywordGuide] 완료 - 응답 길이: {len(keyword_guide)}자, 소요시간: {duration:.3f}초")
+    logger.info(f"[KeywordGuide] 완료 - 소요시간: {duration:.3f}초")
 
     return {"keyword_guide": keyword_guide}
