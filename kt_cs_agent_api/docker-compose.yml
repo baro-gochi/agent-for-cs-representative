@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # Redis - 캐싱 서버
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: kt_cs_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ===========================================
+  # Redis Commander - 웹 UI (개발용, 선택사항)
+  # ===========================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: kt_cs_redis_commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    profiles:
+      - dev  # docker-compose --profile dev up으로 실행 시에만 포함
+
+volumes:
+  redis_data:
+    driver: local

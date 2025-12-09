@@ -720,3 +720,282 @@ class DirectFullGuideResponse(BaseModel):
             ]
         }
     }
+
+
+# ==========================================
+# [신규] 캐싱 관련 API 모델
+# ==========================================
+
+class CachedRequest(BaseModel):
+    """
+    캐싱 적용 API 요청 모델
+    """
+    summary: str = Field(
+        ...,
+        min_length=5,
+        max_length=2000,
+        description="상담 내용 요약",
+        json_schema_extra={"example": "인터넷 약정 해지 시 위약금 계산법이 궁금합니다."}
+    )
+    use_l1_cache: bool = Field(
+        default=True,
+        description="L1 캐시 사용 여부 (질문→응답 캐싱)"
+    )
+    use_l2_cache: bool = Field(
+        default=True,
+        description="L2 캐시 사용 여부 (검색 결과 캐싱)"
+    )
+    use_llm_normalization: bool = Field(
+        default=True,
+        description="LLM 기반 질문 정규화 사용 여부"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "summary": "3년 약정 기간 중 14개월 사용 후 중도 해지 시 위약금 문의",
+                    "use_l1_cache": True,
+                    "use_l2_cache": True,
+                    "use_llm_normalization": True
+                }
+            ]
+        }
+    }
+
+
+class CachedResponse(BaseModel):
+    """
+    캐싱 적용 API 응답 모델
+    """
+    original_summary: str = Field(
+        ...,
+        description="원본 상담 요약"
+    )
+    normalized_query: Optional[str] = Field(
+        default=None,
+        description="정규화된 질문 (캐시 키 생성용)"
+    )
+    keyword_guide: Dict[str, Any] = Field(
+        ...,
+        description="핵심 키워드 기반 간결 가이드 (JSON 구조화)"
+    )
+    documents: List[DocumentInfo] = Field(
+        default_factory=list,
+        description="검색된 참조 문서 목록"
+    )
+
+    # 캐시 메타데이터
+    l1_cache_hit: bool = Field(
+        default=False,
+        description="L1 캐시 히트 여부"
+    )
+    l2_cache_hit: bool = Field(
+        default=False,
+        description="L2 캐시 히트 여부"
+    )
+    cache_status: str = Field(
+        default="miss",
+        description="캐시 상태 (l1_hit, l2_hit, miss)"
+    )
+
+    processing_time_ms: float = Field(
+        ...,
+        description="처리 소요 시간 (밀리초)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "original_summary": "인터넷 해지 위약금 문의",
+                    "normalized_query": "인터넷 해지 위약금",
+                    "keyword_guide": {
+                        "guide_items": [
+                            {"topic": "위약금", "points": ["24개월 약정", "잔여개월 x 할인액"]}
+                        ]
+                    },
+                    "documents": [],
+                    "l1_cache_hit": True,
+                    "l2_cache_hit": False,
+                    "cache_status": "l1_hit",
+                    "processing_time_ms": 15.2
+                }
+            ]
+        }
+    }
+
+
+class CacheStatsResponse(BaseModel):
+    """
+    캐시 통계 응답 모델
+    """
+    connected: bool = Field(
+        ...,
+        description="Redis 연결 상태"
+    )
+    l1_cache_count: int = Field(
+        default=0,
+        description="L1 캐시 항목 수"
+    )
+    l2_cache_count: int = Field(
+        default=0,
+        description="L2 캐시 항목 수"
+    )
+    used_memory: str = Field(
+        default="N/A",
+        description="Redis 메모리 사용량"
+    )
+    used_memory_peak: str = Field(
+        default="N/A",
+        description="Redis 최대 메모리 사용량"
+    )
+    l1_ttl_seconds: int = Field(
+        ...,
+        description="L1 캐시 TTL (초)"
+    )
+    l2_ttl_seconds: int = Field(
+        ...,
+        description="L2 캐시 TTL (초)"
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="에러 메시지 (있는 경우)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "connected": True,
+                    "l1_cache_count": 150,
+                    "l2_cache_count": 320,
+                    "used_memory": "2.5M",
+                    "used_memory_peak": "3.1M",
+                    "l1_ttl_seconds": 3600,
+                    "l2_ttl_seconds": 7200,
+                    "error": None
+                }
+            ]
+        }
+    }
+
+
+class CacheInvalidateRequest(BaseModel):
+    """
+    캐시 무효화 요청 모델
+    """
+    level: str = Field(
+        default="all",
+        description="무효화할 캐시 레벨 (l1, l2, all)"
+    )
+    query: Optional[str] = Field(
+        default=None,
+        description="특정 쿼리의 캐시만 무효화 (선택적)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "level": "l1",
+                    "query": None
+                }
+            ]
+        }
+    }
+
+
+class CacheInvalidateResponse(BaseModel):
+    """
+    캐시 무효화 응답 모델
+    """
+    success: bool = Field(
+        ...,
+        description="무효화 성공 여부"
+    )
+    l1_deleted: int = Field(
+        default=0,
+        description="삭제된 L1 캐시 항목 수"
+    )
+    l2_deleted: int = Field(
+        default=0,
+        description="삭제된 L2 캐시 항목 수"
+    )
+    message: str = Field(
+        ...,
+        description="결과 메시지"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "success": True,
+                    "l1_deleted": 150,
+                    "l2_deleted": 320,
+                    "message": "모든 캐시가 무효화되었습니다."
+                }
+            ]
+        }
+    }
+
+
+class NormalizeTestRequest(BaseModel):
+    """
+    질문 정규화 테스트 요청 모델
+    """
+    queries: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=10,
+        description="정규화할 질문 목록 (최대 10개)"
+    )
+    use_llm: bool = Field(
+        default=True,
+        description="LLM 기반 정규화 사용 여부"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "queries": [
+                        "위약금이 얼마예요?",
+                        "해지 위약금 알려주세요",
+                        "약정 해지시 위약금"
+                    ],
+                    "use_llm": True
+                }
+            ]
+        }
+    }
+
+
+class NormalizeTestResponse(BaseModel):
+    """
+    질문 정규화 테스트 응답 모델
+    """
+    results: List[Dict[str, str]] = Field(
+        ...,
+        description="정규화 결과 목록"
+    )
+    processing_time_ms: float = Field(
+        ...,
+        description="총 처리 소요 시간 (밀리초)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "results": [
+                        {"original": "위약금이 얼마예요?", "normalized": "위약금 금액"},
+                        {"original": "해지 위약금 알려주세요", "normalized": "위약금 금액"},
+                        {"original": "약정 해지시 위약금", "normalized": "위약금 금액"}
+                    ],
+                    "processing_time_ms": 456.7
+                }
+            ]
+        }
+    }

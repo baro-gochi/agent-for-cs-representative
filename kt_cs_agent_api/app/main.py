@@ -1,6 +1,6 @@
 """
 ===========================================
-KT 상담원 AI Agent API - 메인 애플리케이션
+KT CS 상담원 AI Agent API - 메인 애플리케이션
 ===========================================
 
 이 파일은 FastAPI 애플리케이션의 진입점입니다.
@@ -27,8 +27,10 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.api import health_router, consultation_router, expert_router, comparison_router
+from app.api.cache import router as cache_router
 from app.utils import setup_logging
 from app.database import get_vector_db_manager
+from app.utils.cache_manager import cache_manager
 
 # 로깅 설정
 setup_logging()
@@ -63,7 +65,21 @@ async def lifespan(app: FastAPI):
     logger.info(f"응답 모델: {settings.RESPONSE_MODEL}")
     logger.info(f"최대 동시 요청: {settings.MAX_CONCURRENT_REQUESTS}")
     logger.info(f"Rate Limit: {settings.RATE_LIMIT_PER_MINUTE}/분")
-    
+    logger.info(f"캐싱 활성화: {settings.CACHE_ENABLED}")
+
+    # Redis 캐시 연결 초기화
+    if settings.CACHE_ENABLED:
+        try:
+            connected = await cache_manager.connect()
+            if connected:
+                logger.info(f"Redis 캐시 연결 성공: {settings.REDIS_HOST}:{settings.REDIS_PORT}")
+                logger.info(f"L1 캐시 TTL: {settings.CACHE_L1_TTL}초")
+                logger.info(f"L2 캐시 TTL: {settings.CACHE_L2_TTL}초")
+            else:
+                logger.warning("Redis 캐시 연결 실패 - 캐싱 없이 운영됩니다")
+        except Exception as e:
+            logger.warning(f"Redis 캐시 초기화 오류: {e} - 캐싱 없이 운영됩니다")
+
     # 벡터 DB 미리 초기화 (선택적)
     # 첫 요청 시 지연을 피하고 싶다면 주석 해제
     # try:
@@ -72,12 +88,17 @@ async def lifespan(app: FastAPI):
     #     logger.info("벡터 DB 초기화 완료")
     # except Exception as e:
     #     logger.error(f"벡터 DB 초기화 실패: {e}")
-    
+
     yield  # 애플리케이션 실행
-    
+
     # -----------------------------------------
     # Shutdown
     # -----------------------------------------
+    # Redis 연결 종료
+    if cache_manager.is_connected():
+        await cache_manager.disconnect()
+        logger.info("Redis 캐시 연결 종료")
+
     logger.info("KT 상담원 AI Agent API 종료")
 
 
@@ -86,10 +107,10 @@ async def lifespan(app: FastAPI):
 # ==========================================
 
 app = FastAPI(
-    title="KT 상담원 AI Agent API",
+    title="KT CS 상담원 AI Agent API",
     description="""
 ## 개요
-KT 고객센터 상담원을 지원하는 AI Agent API입니다.
+KT CS 고객센터 상담원을 지원하는 AI Agent API입니다.
 
 ## 주요 기능
 
@@ -112,6 +133,12 @@ KT 고객센터 상담원을 지원하는 AI Agent API입니다.
 - 키워드 추출 + 핵심 가이드 생성
 - 직접 임베딩 + 긴 가이드 생성
 
+### ⚡ 캐시 API (`/cache`)
+- L1 캐시: 정규화된 질문 → 전체 응답 캐싱
+- L2 캐시: 검색 쿼리 → 벡터 검색 결과 캐싱
+- 캐시 통계 조회 및 무효화
+- 질문 정규화 테스트
+
 ## Rate Limiting
 - 분당 최대 30회 요청
 - 동시 요청 최대 10개
@@ -121,11 +148,11 @@ KT 고객센터 상담원을 지원하는 AI Agent API입니다.
     """,
     version="1.0.0",
     contact={
-        "name": "KT AI Team",
-        "email": "ai-team@kt.com"
+        "name": "Team Barogochi",
+        "email": "-"
     },
     license_info={
-        "name": "Internal Use Only"
+        "name": "MIT License",
     },
     lifespan=lifespan
 )
@@ -184,6 +211,9 @@ app.include_router(expert_router)
 # 비교용 API (신규)
 app.include_router(comparison_router)
 
+# 캐시 관리 API (신규)
+app.include_router(cache_router)
+
 
 # ==========================================
 # 루트 엔드포인트
@@ -211,6 +241,13 @@ async def root():
                 "direct_keyword": "/comparison/direct-keyword",
                 "keyword_extraction": "/comparison/keyword-extraction",
                 "direct_full_guide": "/comparison/direct-full-guide"
+            },
+            "cache": {
+                "query": "/cache/query",
+                "stats": "/cache/stats",
+                "invalidate": "/cache/invalidate",
+                "normalize_test": "/cache/normalize-test",
+                "benchmark": "/cache/benchmark"
             }
         }
     }

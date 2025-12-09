@@ -26,7 +26,7 @@ LangGraph 워크플로우 구성
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from functools import lru_cache
 
 from langgraph.graph import StateGraph, START, END
@@ -477,6 +477,87 @@ async def run_direct_keyword_guide_async(summary: str) -> Dict[str, Any]:
 
 
 # ==========================================
+# [신규] L2 캐시용 분리 함수들
+# ==========================================
+
+def run_direct_search_only(summary: str) -> List:
+    """
+    직접 임베딩 검색만 수행 (L2 캐시용)
+
+    키워드 가이드 생성 없이 검색 결과만 반환합니다.
+    L2 캐시 미스 시 검색 결과를 얻기 위해 사용합니다.
+
+    Args:
+        summary: 상담 내용 요약 텍스트
+
+    Returns:
+        List[Document]: 검색된 문서 리스트
+    """
+    logger.info(f"[L2Cache] 직접 임베딩 검색만 실행: '{summary[:50]}...'")
+
+    app = get_direct_search_app()
+    initial_state = create_initial_state(summary)
+
+    try:
+        result = app.invoke(initial_state)
+        return result.get("documents", [])
+    except Exception as e:
+        logger.error(f"[L2Cache] 검색 실패: {e}")
+        return []
+
+
+async def run_direct_search_only_async(summary: str) -> List:
+    """직접 임베딩 검색만 비동기 실행 (L2 캐시용)"""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_direct_search_only, summary)
+    return result
+
+
+def run_keyword_guide_only(summary: str, documents: List) -> Dict[str, Any]:
+    """
+    검색 결과로 핵심 가이드만 생성 (L2 캐시용)
+
+    이미 검색된 문서(L2 캐시 히트)로 가이드만 생성합니다.
+
+    Args:
+        summary: 상담 내용 요약 텍스트
+        documents: 검색된 문서 리스트 (L2 캐시에서 가져온 것)
+
+    Returns:
+        Dict: keyword_guide 결과
+    """
+    from app.agent.nodes import keyword_guide_node
+
+    logger.info(f"[L2Cache] 핵심 가이드만 생성: 문서 {len(documents)}개")
+
+    # AgentState 형식으로 구성
+    state = {
+        "summary": summary,
+        "documents": documents,
+        "target_doc_name": "",
+        "search_query": "",
+        "response_guide": "",
+        "keyword_guide": {}
+    }
+
+    try:
+        result = keyword_guide_node(state)
+        return result
+    except Exception as e:
+        logger.error(f"[L2Cache] 가이드 생성 실패: {e}")
+        return {"keyword_guide": {}}
+
+
+async def run_keyword_guide_only_async(summary: str, documents: List) -> Dict[str, Any]:
+    """핵심 가이드만 비동기 생성 (L2 캐시용)"""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_keyword_guide_only, summary, documents)
+    return result
+
+
+# ==========================================
 # [신규] 키워드 추출 + 검색 + 핵심 가이드 워크플로우
 # ==========================================
 
@@ -638,4 +719,90 @@ async def run_direct_full_guide_async(summary: str) -> Dict[str, Any]:
     import asyncio
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, run_direct_full_guide, summary)
+    return result
+
+
+# ==========================================
+# [신규] 키워드 추출 기반 L2 캐시용 분리 함수들
+# ==========================================
+
+def run_keyword_search_only(summary: str) -> Dict[str, Any]:
+    """
+    키워드 추출 + 검색만 수행 (L2 캐시용)
+
+    가이드 생성 없이 키워드 추출과 검색 결과만 반환합니다.
+    L2 캐시 미스 시 검색 결과를 얻기 위해 사용합니다.
+
+    Args:
+        summary: 상담 내용 요약 텍스트
+
+    Returns:
+        Dict:
+            - search_query: 추출된 키워드
+            - documents: 검색된 문서 리스트
+    """
+    logger.info(f"[L2Cache] 키워드 추출 + 검색만 실행: '{summary[:50]}...'")
+
+    app = get_expert_app()  # analyzer + searcher만 있는 워크플로우
+    initial_state = create_initial_state(summary)
+
+    try:
+        result = app.invoke(initial_state)
+        return {
+            "search_query": result.get("search_query", ""),
+            "documents": result.get("documents", [])
+        }
+    except Exception as e:
+        logger.error(f"[L2Cache] 키워드 검색 실패: {e}")
+        return {"search_query": "", "documents": []}
+
+
+async def run_keyword_search_only_async(summary: str) -> Dict[str, Any]:
+    """키워드 추출 + 검색만 비동기 실행 (L2 캐시용)"""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_keyword_search_only, summary)
+    return result
+
+
+def run_response_guide_only(summary: str, documents: List) -> Dict[str, Any]:
+    """
+    검색 결과로 긴 가이드(response_guide)만 생성 (L2 캐시용)
+
+    이미 검색된 문서(L2 캐시 히트)로 긴 가이드만 생성합니다.
+
+    Args:
+        summary: 상담 내용 요약 텍스트
+        documents: 검색된 문서 리스트 (L2 캐시에서 가져온 것)
+
+    Returns:
+        Dict: response_guide 결과
+    """
+    from app.agent.nodes import response_generator_node
+
+    logger.info(f"[L2Cache] 긴 가이드만 생성: 문서 {len(documents)}개")
+
+    # AgentState 형식으로 구성
+    state = {
+        "summary": summary,
+        "documents": documents,
+        "target_doc_name": "",
+        "search_query": "",
+        "response_guide": {},
+        "keyword_guide": {}
+    }
+
+    try:
+        result = response_generator_node(state)
+        return result
+    except Exception as e:
+        logger.error(f"[L2Cache] 긴 가이드 생성 실패: {e}")
+        return {"response_guide": {}}
+
+
+async def run_response_guide_only_async(summary: str, documents: List) -> Dict[str, Any]:
+    """긴 가이드만 비동기 생성 (L2 캐시용)"""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_response_guide_only, summary, documents)
     return result

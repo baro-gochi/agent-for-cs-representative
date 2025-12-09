@@ -1,0 +1,221 @@
+"""
+===========================================
+LLM 기반 질문 정규화 서비스
+===========================================
+
+이 모듈은 들어오는 질문을 정규화하여
+캐시 히트율을 높입니다.
+
+정규화 기능:
+- 공백/줄바꿈 정리
+- 유사 표현 통일 (예: "위약금", "약정 해지금", "해지 위약금" → "위약금")
+- 불필요한 조사/어미 정리
+- 의미 보존하며 핵심 표현 추출
+
+사용 예시:
+    from app.utils.query_normalizer import normalize_query
+
+    original = "저 약정 해지하려고 하는데 위약금이 얼마나 되는지요?"
+    normalized = await normalize_query(original)
+    # 결과: "약정 해지 위약금 금액"
+"""
+
+import re
+import logging
+from typing import Optional
+
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+from app.config import settings
+from app.utils.cache_manager import cache_manager
+
+logger = logging.getLogger(__name__)
+
+
+# 간단한 정규화 규칙 (LLM 호출 전 사전 처리)
+SIMPLE_NORMALIZE_PATTERNS = [
+    # 공백 정리
+    (r'\s+', ' '),
+    # 물음표, 마침표 등 제거
+    (r'[?？!！.。]+$', ''),
+    # 존칭/어미 정리
+    (r'요$|니다$|습니다$|세요$|입니다$', ''),
+    # 불필요한 조사 정리
+    (r'은|는|이|가|을|를|의', ' '),
+]
+
+
+def simple_normalize(text: str) -> str:
+    """
+    간단한 규칙 기반 정규화 (LLM 호출 전 사전 처리)
+
+    Args:
+        text: 원본 텍스트
+
+    Returns:
+        str: 간단히 정규화된 텍스트
+    """
+    result = text.strip()
+
+    for pattern, replacement in SIMPLE_NORMALIZE_PATTERNS:
+        result = re.sub(pattern, replacement, result)
+
+    # 연속 공백 정리
+    result = re.sub(r'\s+', ' ', result).strip()
+
+    return result
+
+
+async def normalize_query_with_llm(query: str) -> str:
+    """
+    LLM을 사용하여 질문을 정규화
+
+    유사한 의미의 질문들을 동일한 형태로 변환합니다.
+    예: "위약금 얼마야?" = "해지 위약금 금액" = "약정 해지시 위약금"
+
+    Args:
+        query: 원본 질문
+
+    Returns:
+        str: 정규화된 질문
+    """
+    llm = ChatOpenAI(
+        model=settings.NORMALIZER_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+        temperature=0,
+        max_tokens=100,
+    )
+
+    prompt = ChatPromptTemplate.from_template("""
+아래 고객 문의를 검색/캐싱용 정규화된 형태로 변환하세요.
+
+규칙:
+1. 핵심 키워드만 추출 (조사, 어미 제거)
+2. 유사 표현을 대표 표현으로 통일:
+   - "위약금", "해지금", "약정 해지 비용" → "위약금"
+   - "요금", "월 요금", "요금제 가격" → "요금"
+   - "해지", "해약", "계약 해지" → "해지"
+   - "변경", "교체", "바꾸기" → "변경"
+   - "가입", "신규 가입", "신청" → "가입"
+3. 3~10단어로 축약
+4. 띄어쓰기로 구분된 키워드 나열
+5. 의미가 변하지 않도록 주의
+
+원본: {query}
+
+정규화 결과 (키워드만 출력):""")
+
+    chain = prompt | llm | StrOutputParser()
+    result = chain.invoke({"query": query})
+
+    return result.strip()
+
+
+async def normalize_query(query: str, use_llm: bool = True) -> str:
+    """
+    질문 정규화 메인 함수
+
+    1. 캐시에서 이미 정규화된 쿼리 확인
+    2. 없으면 LLM으로 정규화 후 캐시에 저장
+
+    Args:
+        query: 원본 질문
+        use_llm: LLM 사용 여부 (False면 간단한 규칙만 적용)
+
+    Returns:
+        str: 정규화된 질문
+    """
+    # 1. 간단한 규칙 기반 정규화 (항상 적용)
+    simple_normalized = simple_normalize(query)
+
+    if not use_llm:
+        return simple_normalized
+
+    # 2. 캐시에서 정규화된 쿼리 확인
+    if cache_manager.is_connected():
+        cached_normalized = await cache_manager.get_normalized_query(simple_normalized)
+        if cached_normalized:
+            logger.debug(f"[Normalizer] 캐시 히트: {cached_normalized[:30]}...")
+            return cached_normalized
+
+    # 3. LLM으로 정규화
+    try:
+        llm_normalized = await normalize_query_with_llm(simple_normalized)
+        logger.info(f"[Normalizer] LLM 정규화: '{simple_normalized[:30]}...' → '{llm_normalized}'")
+
+        # 4. 정규화 결과 캐시에 저장
+        if cache_manager.is_connected():
+            await cache_manager.set_normalized_query(simple_normalized, llm_normalized)
+
+        return llm_normalized
+
+    except Exception as e:
+        logger.warning(f"[Normalizer] LLM 정규화 실패: {e}, 간단 정규화 결과 사용")
+        return simple_normalized
+
+
+async def batch_normalize_queries(queries: list[str]) -> list[str]:
+    """
+    여러 질문을 일괄 정규화
+
+    Args:
+        queries: 원본 질문 리스트
+
+    Returns:
+        list[str]: 정규화된 질문 리스트
+    """
+    results = []
+    for query in queries:
+        normalized = await normalize_query(query)
+        results.append(normalized)
+    return results
+
+
+# 동의어 사전 (LLM 정규화 보완용)
+SYNONYM_MAP = {
+    # 위약금 관련
+    "해지금": "위약금",
+    "약정해지금": "위약금",
+    "위약": "위약금",
+    "해약금": "위약금",
+    "해약": "해지",
+    "해지위약금": "위약금",
+
+    # 요금 관련
+    "월요금": "요금",
+    "요금제가격": "요금",
+    "월납": "요금",
+
+    # 변경 관련
+    "교체": "변경",
+    "바꾸기": "변경",
+    "전환": "변경",
+
+    # 가입 관련
+    "신규가입": "가입",
+    "신청": "가입",
+    "개통": "가입",
+
+    # 약정 관련
+    "약정기간": "약정",
+    "계약기간": "약정",
+    "의무사용기간": "약정",
+}
+
+
+def apply_synonyms(text: str) -> str:
+    """
+    동의어 사전을 적용하여 추가 정규화
+
+    Args:
+        text: 정규화된 텍스트
+
+    Returns:
+        str: 동의어 적용된 텍스트
+    """
+    result = text
+    for original, replacement in SYNONYM_MAP.items():
+        result = result.replace(original, replacement)
+    return result
