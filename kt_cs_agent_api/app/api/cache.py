@@ -468,7 +468,7 @@ async def normalize_test(request: NormalizeTestRequest) -> NormalizeTestResponse
 async def _count_keys_by_prefix(prefix: str) -> int:
     """특정 프리픽스를 가진 키 개수 조회"""
     try:
-        if not cache_manager._redis:
+        if not cache_manager._client:
             return 0
 
         count = 0
@@ -476,7 +476,7 @@ async def _count_keys_by_prefix(prefix: str) -> int:
         pattern = f"{prefix}*"
 
         while True:
-            cursor, keys = await cache_manager._redis.scan(
+            cursor, keys = await cache_manager._client.scan(
                 cursor=cursor,
                 match=pattern,
                 count=100
@@ -494,7 +494,7 @@ async def _count_keys_by_prefix(prefix: str) -> int:
 async def _delete_keys_by_prefix(prefix: str) -> int:
     """특정 프리픽스를 가진 모든 키 삭제"""
     try:
-        if not cache_manager._redis:
+        if not cache_manager._client:
             return 0
 
         deleted = 0
@@ -502,14 +502,14 @@ async def _delete_keys_by_prefix(prefix: str) -> int:
         pattern = f"{prefix}*"
 
         while True:
-            cursor, keys = await cache_manager._redis.scan(
+            cursor, keys = await cache_manager._client.scan(
                 cursor=cursor,
                 match=pattern,
                 count=100
             )
 
             if keys:
-                await cache_manager._redis.delete(*keys)
+                await cache_manager._client.delete(*keys)
                 deleted += len(keys)
 
             if cursor == 0:
@@ -524,7 +524,7 @@ async def _delete_keys_by_prefix(prefix: str) -> int:
 async def _delete_oldest_keys(prefix: str, count: int) -> int:
     """TTL 기준으로 가장 오래된 키 삭제 (LRU 방식)"""
     try:
-        if not cache_manager._redis or count <= 0:
+        if not cache_manager._client or count <= 0:
             return 0
 
         # 키와 TTL 수집
@@ -533,14 +533,14 @@ async def _delete_oldest_keys(prefix: str, count: int) -> int:
         pattern = f"{prefix}*"
 
         while True:
-            cursor, keys = await cache_manager._redis.scan(
+            cursor, keys = await cache_manager._client.scan(
                 cursor=cursor,
                 match=pattern,
                 count=100
             )
 
             for key in keys:
-                ttl = await cache_manager._redis.ttl(key)
+                ttl = await cache_manager._client.ttl(key)
                 keys_with_ttl.append((key, ttl))
 
             if cursor == 0:
@@ -553,7 +553,7 @@ async def _delete_oldest_keys(prefix: str, count: int) -> int:
         to_delete = [key for key, _ in keys_with_ttl[:count]]
 
         if to_delete:
-            await cache_manager._redis.delete(*to_delete)
+            await cache_manager._client.delete(*to_delete)
 
         return len(to_delete)
     except Exception as e:

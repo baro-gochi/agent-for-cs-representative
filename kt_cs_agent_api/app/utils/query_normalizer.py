@@ -105,6 +105,7 @@ async def normalize_query_with_llm(query: str) -> str:
 3. 3~10단어로 축약
 4. 띄어쓰기로 구분된 키워드 나열
 5. 의미가 변하지 않도록 주의
+6. 5G, 스마트 등 중요 단어 누락 금지
 
 원본: {query}
 

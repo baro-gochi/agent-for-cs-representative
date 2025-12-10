@@ -37,6 +37,8 @@ from app.agent.workflow import (
     run_keyword_search_only_async,
     run_response_guide_only_async
 )
+from app.agent.nodes import expand_query_async, detect_category_from_query
+from app.database import get_vector_db_manager
 from app.utils import request_limiter
 from app.utils.cache_helpers import (
     DirectKeywordCacheHelper,
@@ -161,7 +163,6 @@ async def direct_keyword_guide(request: ComparisonRequest):
 
                 # L1 캐시에 저장
                 l1_data = cache.build_l1_response(
-                    extracted_keywords=None,
                     documents=documents_for_guide,
                     keyword_guide=keyword_guide
                 )
@@ -176,19 +177,35 @@ async def direct_keyword_guide(request: ComparisonRequest):
                 )
 
             # ==========================================
-            # Step 3: 캐시 미스 - 전체 처리
+            # Step 3: 캐시 미스 - 질문 확장 후 전체 처리
             # ==========================================
-            logger.info("[API] 캐시 미스 - 검색 + 가이드 생성 수행")
+            logger.info("[API] 캐시 미스 - 질문 확장 + 검색 + 가이드 생성 수행")
 
             try:
-                # 검색 수행
-                raw_documents = await run_direct_search_only_async(request.summary)
+                # 1. 원본 질문으로 카테고리 판별
+                categories = detect_category_from_query(request.summary)
+                logger.info(f"[API] 카테고리 판별: {categories or '전체'}")
+
+                # 2. 질문 확장 (검색 품질 향상)
+                expanded_query = await expand_query_async(request.summary)
+                logger.info(f"[API] 확장된 쿼리: '{expanded_query[:80]}...'")
+
+                # 3. 확장된 쿼리 + 카테고리 필터로 검색
+                import asyncio
+                db_manager = get_vector_db_manager()
+                raw_documents = await asyncio.to_thread(
+                    db_manager.similarity_search_by_categories,
+                    expanded_query,
+                    categories,
+                    5  # k=5
+                )
+                logger.info(f"[API] 검색 결과: {len(raw_documents)}개 문서")
 
                 # L2 캐시에 검색 결과 저장
                 if raw_documents:
                     await cache.set_l2_cache(normalized_query, raw_documents, k=5)
 
-                # 가이드 생성
+                # 가이드 생성 (원본 질문 사용)
                 guide_result = await run_keyword_guide_only_async(
                     request.summary,
                     raw_documents
@@ -353,13 +370,17 @@ async def keyword_extraction_guide(request: ComparisonRequest):
                 )
 
             # ==========================================
-            # Step 3: 캐시 미스 - 전체 처리
+            # Step 3: 캐시 미스 - 질문 확장 후 전체 처리
             # ==========================================
-            logger.info("[API] 캐시 미스 - 키워드 추출 + 검색 + 가이드 생성 수행")
+            logger.info("[API] 캐시 미스 - 질문 확장 + 키워드 추출 + 검색 + 가이드 생성 수행")
 
             try:
-                # 키워드 추출 + 검색 수행
-                search_result = await run_keyword_search_only_async(request.summary)
+                # 질문 확장 (검색 품질 향상)
+                expanded_query = await expand_query_async(request.summary)
+                logger.info(f"[API] 확장된 쿼리: '{expanded_query[:80]}...'")
+
+                # 확장된 쿼리로 키워드 추출 + 검색 수행
+                search_result = await run_keyword_search_only_async(expanded_query)
                 raw_documents = search_result.get("documents", [])
                 extracted_keywords = search_result.get("search_query", "")
 
@@ -367,7 +388,7 @@ async def keyword_extraction_guide(request: ComparisonRequest):
                 if raw_documents:
                     await cache.set_l2_cache(normalized_query, raw_documents, k=5)
 
-                # 가이드 생성
+                # 가이드 생성 (원본 질문 사용)
                 guide_result = await run_keyword_guide_only_async(
                     request.summary,
                     raw_documents
@@ -535,19 +556,35 @@ async def direct_full_guide(request: ComparisonRequest):
                 )
 
             # ==========================================
-            # Step 3: 캐시 미스 - 전체 처리
+            # Step 3: 캐시 미스 - 질문 확장 후 전체 처리
             # ==========================================
-            logger.info("[API] 캐시 미스 - 검색 + 긴 가이드 생성 수행")
+            logger.info("[API] 캐시 미스 - 질문 확장 + 검색 + 긴 가이드 생성 수행")
 
             try:
-                # 직접 임베딩 검색 수행
-                raw_documents = await run_direct_search_only_async(request.summary)
+                # 1. 원본 질문으로 카테고리 판별
+                categories = detect_category_from_query(request.summary)
+                logger.info(f"[API] 카테고리 판별: {categories or '전체'}")
+
+                # 2. 질문 확장 (검색 품질 향상)
+                expanded_query = await expand_query_async(request.summary)
+                logger.info(f"[API] 확장된 쿼리: '{expanded_query[:80]}...'")
+
+                # 3. 확장된 쿼리 + 카테고리 필터로 검색
+                import asyncio
+                db_manager = get_vector_db_manager()
+                raw_documents = await asyncio.to_thread(
+                    db_manager.similarity_search_by_categories,
+                    expanded_query,
+                    categories,
+                    5  # k=5
+                )
+                logger.info(f"[API] 검색 결과: {len(raw_documents)}개 문서")
 
                 # L2 캐시에 검색 결과 저장
                 if raw_documents:
                     await cache.set_l2_cache(normalized_query, raw_documents, k=5)
 
-                # 긴 가이드 생성
+                # 긴 가이드 생성 (원본 질문 사용)
                 guide_result = await run_response_guide_only_async(
                     request.summary,
                     raw_documents

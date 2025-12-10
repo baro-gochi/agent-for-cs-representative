@@ -200,6 +200,66 @@ class VectorDBManager:
             logger.error(f"검색 실패: {str(e)}")
             raise RuntimeError(f"벡터 검색 실패: {str(e)}")
 
+    def similarity_search_by_categories(
+        self,
+        query: str,
+        categories: List[str],
+        k: int = 3
+    ) -> List[Document]:
+        """
+        카테고리 필터를 적용한 유사도 검색
+
+        Args:
+            query: 검색 쿼리 텍스트
+            categories: 검색할 카테고리 리스트 (예: ["tv", "bundle"])
+                        빈 리스트면 전체 검색
+            k: 반환할 문서 수
+
+        Returns:
+            List[Document]: 유사도 순으로 정렬된 문서 리스트
+
+        카테고리:
+            - tv: TV 요금제
+            - bundle: 결합 요금제
+            - mobile_internet: 인터넷, 모바일 요금제
+            - membership: 멤버십 혜택
+        """
+        self.ensure_initialized()
+
+        try:
+            # 카테고리 필터 없으면 전체 검색
+            if not categories:
+                logger.debug(f"[Search] 전체 검색: query='{query[:30]}...', k={k}")
+                return self.vectorstore.similarity_search(query, k=k)
+
+            # 단일 카테고리
+            if len(categories) == 1:
+                filter_dict = {"doc_category": categories[0]}
+                logger.debug(f"[Search] 카테고리 필터: {categories[0]}, query='{query[:30]}...', k={k}")
+                return self.vectorstore.similarity_search(query, k=k, filter=filter_dict)
+
+            # 다중 카테고리 - ChromaDB는 $in 연산자 지원
+            if self.db_type == "chroma":
+                filter_dict = {"doc_category": {"$in": categories}}
+                logger.debug(f"[Search] 다중 카테고리: {categories}, query='{query[:30]}...', k={k}")
+                return self.vectorstore.similarity_search(query, k=k, filter=filter_dict)
+            else:
+                # PGVector는 $in 미지원 - 각 카테고리별로 검색 후 병합
+                all_results = []
+                k_per_cat = max(1, k // len(categories))
+                for cat in categories:
+                    filter_dict = {"doc_category": cat}
+                    results = self.vectorstore.similarity_search(query, k=k_per_cat, filter=filter_dict)
+                    all_results.extend(results)
+                logger.debug(f"[Search] PGVector 다중 카테고리: {categories}, 결과 {len(all_results)}개")
+                return all_results[:k]
+
+        except Exception as e:
+            logger.error(f"카테고리 검색 실패: {str(e)}")
+            # 폴백: 전체 검색
+            logger.warning("전체 검색으로 폴백")
+            return self.vectorstore.similarity_search(query, k=k)
+
     def similarity_search_with_score(
         self,
         query: str,

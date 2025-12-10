@@ -33,6 +33,7 @@ from app.agent.workflow import (
     run_keyword_search_only_async,
     run_response_guide_only_async
 )
+from app.agent.nodes import expand_query_async
 from app.utils import request_limiter
 from app.utils.cache_helpers import ConsultationCacheHelper
 
@@ -189,12 +190,17 @@ async def assist_consultation(request: ConsultationRequest):
                 )
 
             # ==========================================
-            # Step 3: 캐시 미스 - 전체 처리
+            # Step 3: 캐시 미스 - 질문 확장 후 전체 처리
             # ==========================================
-            logger.info("[API] 캐시 미스 - 전체 처리 수행")
+            logger.info("[API] 캐시 미스 - 질문 확장 + 전체 처리 수행")
 
             try:
-                result = await run_consultation_async(request.summary)
+                # 질문 확장 (검색 품질 향상)
+                expanded_query = await expand_query_async(request.summary)
+                logger.info(f"[API] 확장된 쿼리: '{expanded_query[:80]}...'")
+
+                # 확장된 쿼리로 Agent 실행
+                result = await run_consultation_async(expanded_query)
             except Exception as e:
                 logger.error(f"[API] Agent 실행 실패: {e}")
                 raise HTTPException(
