@@ -10,8 +10,6 @@ from app.models.schemas import (
     HealthStatus,
     ConsultationRequest,
     ConsultationResponse,
-    ExpertSearchRequest,
-    ExpertSearchResponse,
     ErrorResponse,
     QueueStatusResponse,
     # JSON 구조화된 가이드 모델
@@ -21,7 +19,6 @@ from app.models.schemas import (
     StructuredKeywordGuide,
     # 비교용 API 모델
     ComparisonRequest,
-    DirectSearchResponse,
     KeywordGuideResponse,
     DirectFullGuideResponse
 )
@@ -31,8 +28,6 @@ __all__ = [
     "HealthStatus",
     "ConsultationRequest",
     "ConsultationResponse",
-    "ExpertSearchRequest",
-    "ExpertSearchResponse",
     "ErrorResponse",
     "QueueStatusResponse",
     # JSON 구조화된 가이드 모델
@@ -42,7 +37,6 @@ __all__ = [
     "StructuredKeywordGuide",
     # 비교용 API 모델
     "ComparisonRequest",
-    "DirectSearchResponse",
     "KeywordGuideResponse",
     "DirectFullGuideResponse"
 ]

@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.api import health_router, consultation_router, expert_router, comparison_router
+from app.api import health_router, consultation_router, comparison_router
 from app.api.cache import router as cache_router
 from app.utils import setup_logging
 from app.database import get_vector_db_manager
@@ -119,16 +119,11 @@ KT CS 고객센터 상담원을 지원하는 AI Agent API입니다.
 - 관련 내부 규정/약관 문서 검색
 - AI 기반 대응방안 생성
 
-### 👨‍💼 전문가용 API (`/expert`)
-- 키워드 직접 검색 (빠른 응답)
-- 문서 목록 조회
-
 ### 🏥 시스템 API (`/health`)
 - 서비스 상태 확인
 - 대기열 상태 조회
 
 ### 🔬 비교용 API (`/comparison`)
-- 직접 임베딩 검색 결과 확인
 - 직접 임베딩 + 핵심 가이드 생성
 - 키워드 추출 + 핵심 가이드 생성
 - 직접 임베딩 + 긴 가이드 생성
@@ -205,10 +200,7 @@ app.include_router(health_router)
 # 신입 상담원용 API
 app.include_router(consultation_router)
 
-# 전문가용 API
-app.include_router(expert_router)
-
-# 비교용 API (신규)
+# 비교용 API
 app.include_router(comparison_router)
 
 # 캐시 관리 API (신규)
@@ -235,9 +227,7 @@ async def root():
             "redoc": "/redoc",
             "health": "/health",
             "consultation": "/consultation/assist",
-            "expert_search": "/expert/search",
             "comparison": {
-                "direct_search": "/comparison/direct-search",
                 "direct_keyword": "/comparison/direct-keyword",
                 "keyword_extraction": "/comparison/keyword-extraction",
                 "direct_full_guide": "/comparison/direct-full-guide"

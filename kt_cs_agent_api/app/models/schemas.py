@@ -78,7 +78,7 @@ class HealthStatus(BaseModel):
 class ConsultationRequest(BaseModel):
     """
     신입 상담원용 상담 요청
-    
+
     상담 내용을 입력받아 키워드 추출, 문서 검색, 대응방안 생성을
     모두 수행하는 Full Agent API의 요청 모델입니다.
     """
@@ -89,26 +89,12 @@ class ConsultationRequest(BaseModel):
         description="상담 내용 요약",
         json_schema_extra={"example": "인터넷 약정 해지 시 위약금 계산법이 궁금합니다."}
     )
-    
-    # 선택적 옵션
-    include_documents: bool = Field(
-        default=True,
-        description="응답에 참조 문서 포함 여부"
-    )
-    max_documents: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="검색할 최대 문서 수"
-    )
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "3년 약정 기간 중 14개월 사용 후 중도 해지 시 발생하는 위약금 및 할인 반환금 산정 상세 내역 문의.",
-                    "include_documents": True,
-                    "max_documents": 3
+                    "summary": "3년 약정 기간 중 14개월 사용 후 중도 해지 시 발생하는 위약금 및 할인 반환금 산정 상세 내역 문의."
                 }
             ]
         }
@@ -138,12 +124,6 @@ class ConsultationResponse(BaseModel):
         ...,
         description="선택된 대상 문서",
         json_schema_extra={"example": "인터넷이용약관"}
-    )
-
-    # 검색 결과
-    documents: List[DocumentInfo] = Field(
-        default_factory=list,
-        description="검색된 참조 문서 목록"
     )
 
     # 대응방안 (JSON 구조화)
@@ -183,14 +163,6 @@ class ConsultationResponse(BaseModel):
                     "original_summary": "인터넷 약정 해지 시 위약금 계산법이 궁금합니다.",
                     "extracted_keywords": "약정 해지 위약금 계산",
                     "target_document": "인터넷이용약관",
-                    "documents": [
-                        {
-                            "source": "인터넷서비스이용약관.pdf",
-                            "page": 5,
-                            "content": "제15조(해지) ...",
-                            "score": 0.234
-                        }
-                    ],
                     "response_guide": {
                         "announcement": {
                             "title": "안내 멘트",
@@ -531,24 +503,12 @@ class ComparisonRequest(BaseModel):
         description="상담 내용 요약",
         json_schema_extra={"example": "인터넷 약정 해지 시 위약금 계산법이 궁금합니다."}
     )
-    include_documents: bool = Field(
-        default=True,
-        description="응답에 참조 문서 포함 여부"
-    )
-    max_documents: int = Field(
-        default=5,
-        ge=1,
-        le=10,
-        description="반환할 최대 문서 수"
-    )
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "3년 약정 기간 중 14개월 사용 후 중도 해지 시 위약금 문의",
-                    "include_documents": True,
-                    "max_documents": 5
+                    "summary": "3년 약정 기간 중 14개월 사용 후 중도 해지 시 위약금 문의"
                 }
             ]
         }
@@ -616,10 +576,6 @@ class KeywordGuideResponse(BaseModel):
         default=None,
         description="추출된 검색 키워드 (keyword_extraction 방식에서만)"
     )
-    documents: List[DocumentInfo] = Field(
-        default_factory=list,
-        description="검색된 참조 문서 목록"
-    )
     keyword_guide: Dict[str, Any] = Field(
         ...,
         description="핵심 키워드 기반 간결 가이드 (JSON 구조화)",
@@ -642,7 +598,6 @@ class KeywordGuideResponse(BaseModel):
                     "original_summary": "인터넷 해지 위약금 문의",
                     "search_method": "direct_embedding",
                     "extracted_keywords": None,
-                    "documents": [],
                     "keyword_guide": {
                         "guide_items": [
                             {"topic": "위약금", "points": ["24개월 약정", "잔여개월 x 할인액", "최대 300,000원"]},
@@ -671,10 +626,6 @@ class DirectFullGuideResponse(BaseModel):
         default="direct_embedding",
         description="검색 방식"
     )
-    documents: List[DocumentInfo] = Field(
-        default_factory=list,
-        description="검색된 참조 문서 목록"
-    )
     response_guide: Dict[str, Any] = Field(
         ...,
         description="신입 상담원을 위한 대응방안 (JSON 구조화)",
@@ -696,7 +647,6 @@ class DirectFullGuideResponse(BaseModel):
                 {
                     "original_summary": "인터넷 해지 위약금 문의",
                     "search_method": "direct_embedding",
-                    "documents": [],
                     "response_guide": {
                         "announcement": {
                             "title": "안내 멘트",

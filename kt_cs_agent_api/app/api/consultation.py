@@ -19,15 +19,13 @@
 
 import logging
 import time
-from typing import List
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.models import (
     ConsultationRequest,
     ConsultationResponse,
-    DocumentInfo,
     ErrorResponse
 )
 from app.agent import run_consultation_async
@@ -51,27 +49,6 @@ router = APIRouter(
         500: {"model": ErrorResponse, "description": "서버 오류"}
     }
 )
-
-
-def _convert_documents(documents: list, max_docs: int) -> List[DocumentInfo]:
-    """문서 리스트를 DocumentInfo 리스트로 변환"""
-    result = []
-    for doc in documents[:max_docs]:
-        # Document 객체 또는 dict 처리
-        if hasattr(doc, 'page_content'):
-            content = doc.page_content
-            metadata = doc.metadata
-        else:
-            content = doc.get("page_content", "")
-            metadata = doc.get("metadata", {})
-
-        result.append(DocumentInfo(
-            source=metadata.get("source", "Unknown").split("/")[-1],
-            page=metadata.get("page", 0) + 1,
-            content=content[:500] + "..." if len(content) > 500 else content,
-            score=None
-        ))
-    return result
 
 
 @router.post(
@@ -154,10 +131,6 @@ async def assist_consultation(request: ConsultationRequest):
                     original_summary=request.summary,
                     extracted_keywords=cached_response.get("extracted_keywords", "") + " (L1 cached)",
                     target_document=cached_response.get("target_document", "없음"),
-                    documents=_convert_documents(
-                        cached_response.get("documents", []),
-                        request.max_documents
-                    ) if request.include_documents else [],
                     response_guide=response_guide,
                     processing_time_ms=round(processing_time_ms, 2)
                 )
@@ -211,10 +184,6 @@ async def assist_consultation(request: ConsultationRequest):
                     original_summary=request.summary,
                     extracted_keywords="(L2 cached)",
                     target_document="없음",
-                    documents=_convert_documents(
-                        cached_documents,
-                        request.max_documents
-                    ) if request.include_documents else [],
                     response_guide=response_guide,
                     processing_time_ms=round(processing_time_ms, 2)
                 )
@@ -240,11 +209,6 @@ async def assist_consultation(request: ConsultationRequest):
             # L2 캐시에 검색 결과 저장
             if raw_documents:
                 await cache.set_l2_cache(normalized_query, raw_documents, k=5)
-
-            # 문서 정보 변환
-            documents: List[DocumentInfo] = []
-            if request.include_documents and raw_documents:
-                documents = _convert_documents(raw_documents, request.max_documents)
 
             # 처리 시간 계산
             processing_time_ms = (time.perf_counter() - start_time) * 1000
@@ -273,7 +237,6 @@ async def assist_consultation(request: ConsultationRequest):
                 original_summary=request.summary,
                 extracted_keywords=extracted_keywords,
                 target_document=target_document,
-                documents=documents,
                 response_guide=response_guide,
                 processing_time_ms=round(processing_time_ms, 2)
             )

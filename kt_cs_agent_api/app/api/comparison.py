@@ -6,7 +6,6 @@
 이 모듈은 다양한 검색/가이드 생성 방식을 비교하기 위한 API를 제공합니다.
 
 엔드포인트:
-    POST /comparison/direct-search       - 직접 임베딩 검색 결과 확인
     POST /comparison/direct-keyword      - 직접 임베딩 + 핵심 가이드 생성
     POST /comparison/keyword-extraction  - 키워드 추출 + 핵심 가이드 생성
     POST /comparison/direct-full-guide   - 직접 임베딩 + 긴 가이드 생성
@@ -23,20 +22,16 @@
 
 import logging
 import time
-from typing import List
 
 from fastapi import APIRouter, HTTPException
 
 from app.models import (
     ComparisonRequest,
-    DirectSearchResponse,
     KeywordGuideResponse,
     DirectFullGuideResponse,
-    DocumentInfo,
     ErrorResponse
 )
 from app.agent.workflow import (
-    run_direct_search_async,
     run_direct_search_only_async,
     run_keyword_guide_only_async,
     run_keyword_search_only_async,
@@ -64,100 +59,8 @@ router = APIRouter(
 )
 
 
-def _convert_documents(documents: list, max_docs: int) -> List[DocumentInfo]:
-    """문서 리스트를 DocumentInfo 리스트로 변환"""
-    result = []
-    for doc in documents[:max_docs]:
-        # Document 객체 또는 dict 처리
-        if hasattr(doc, 'page_content'):
-            content = doc.page_content
-            metadata = doc.metadata
-        else:
-            content = doc.get("page_content", "")
-            metadata = doc.get("metadata", {})
-
-        result.append(DocumentInfo(
-            source=metadata.get("source", "Unknown").split("/")[-1],
-            page=metadata.get("page", 0) + 1,
-            content=content[:500] + "..." if len(content) > 500 else content,
-            score=None
-        ))
-    return result
-
-
 # ==========================================
-# API 1: 직접 임베딩 검색 결과 확인
-# ==========================================
-
-@router.post(
-    "/direct-search",
-    summary="직접 임베딩 검색 결과 확인",
-    description="""
-    질문을 직접 임베딩하여 벡터 DB에서 유사 문서를 검색합니다.
-
-    **특징:**
-    - 키워드 추출 과정 없이 요약문 자체를 임베딩
-    - LLM API 호출 없이 검색만 수행
-    - 빠른 응답 속도
-
-    **비교 대상:** 기존 /expert/search (키워드 추출 후 검색)
-    """,
-    response_model=DirectSearchResponse
-)
-async def direct_search(request: ComparisonRequest):
-    """
-    직접 임베딩 검색 API
-
-    요약문을 임베딩하여 벡터 DB에서 유사 문서를 검색합니다.
-    키워드 추출 과정이 없어 빠른 응답이 가능합니다.
-    """
-    start_time = time.perf_counter()
-
-    try:
-        async with request_limiter.acquire():
-            logger.info(f"[API] 직접 임베딩 검색: '{request.summary[:50]}...'")
-
-            try:
-                result = await run_direct_search_async(request.summary)
-            except Exception as e:
-                logger.error(f"[API] 직접 임베딩 검색 실패: {e}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"검색 중 오류가 발생했습니다: {str(e)}"
-                )
-
-            # 문서 변환
-            documents = []
-            if request.include_documents and result.get("documents"):
-                documents = _convert_documents(
-                    result["documents"],
-                    request.max_documents
-                )
-
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
-
-            response = DirectSearchResponse(
-                original_summary=request.summary,
-                search_method="direct_embedding",
-                total_results=len(result.get("documents", [])),
-                documents=documents,
-                processing_time_ms=round(processing_time_ms, 2)
-            )
-
-            logger.info(f"[API] 직접 임베딩 검색 완료: {len(documents)}개, {processing_time_ms:.2f}ms")
-            return response
-
-    except RuntimeError as e:
-        if "Rate limit" in str(e):
-            raise HTTPException(
-                status_code=429,
-                detail="요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
-            )
-        raise
-
-
-# ==========================================
-# API 2: 직접 임베딩 + 핵심 가이드 생성
+# API 1: 직접 임베딩 + 핵심 가이드 생성
 # ==========================================
 
 @router.post(
@@ -220,10 +123,6 @@ async def direct_keyword_guide(request: ComparisonRequest):
                     original_summary=request.summary,
                     search_method=cache.get_search_method_display("l1_hit"),
                     extracted_keywords=cached_response.get("extracted_keywords"),
-                    documents=_convert_documents(
-                        cached_response.get("documents", []),
-                        request.max_documents
-                    ) if request.include_documents else [],
                     keyword_guide=keyword_guide,
                     processing_time_ms=round(processing_time_ms, 2)
                 )
@@ -272,10 +171,6 @@ async def direct_keyword_guide(request: ComparisonRequest):
                     original_summary=request.summary,
                     search_method=cache.get_search_method_display("l2_hit"),
                     extracted_keywords=None,
-                    documents=_convert_documents(
-                        cached_documents,
-                        request.max_documents
-                    ) if request.include_documents else [],
                     keyword_guide=keyword_guide,
                     processing_time_ms=round(processing_time_ms, 2)
                 )
@@ -325,10 +220,6 @@ async def direct_keyword_guide(request: ComparisonRequest):
                 original_summary=request.summary,
                 search_method=cache.get_search_method_display("miss"),
                 extracted_keywords=None,
-                documents=_convert_documents(
-                    raw_documents,
-                    request.max_documents
-                ) if request.include_documents and raw_documents else [],
                 keyword_guide=keyword_guide,
                 processing_time_ms=round(processing_time_ms, 2)
             )
@@ -346,7 +237,7 @@ async def direct_keyword_guide(request: ComparisonRequest):
 
 
 # ==========================================
-# API 3: 키워드 추출 + 핵심 가이드 생성
+# API 2: 키워드 추출 + 핵심 가이드 생성
 # ==========================================
 
 @router.post(
@@ -409,10 +300,6 @@ async def keyword_extraction_guide(request: ComparisonRequest):
                     original_summary=request.summary,
                     search_method=cache.get_search_method_display("l1_hit"),
                     extracted_keywords=cached_response.get("extracted_keywords", ""),
-                    documents=_convert_documents(
-                        cached_response.get("documents", []),
-                        request.max_documents
-                    ) if request.include_documents else [],
                     keyword_guide=keyword_guide,
                     processing_time_ms=round(processing_time_ms, 2)
                 )
@@ -461,10 +348,6 @@ async def keyword_extraction_guide(request: ComparisonRequest):
                     original_summary=request.summary,
                     search_method=cache.get_search_method_display("l2_hit"),
                     extracted_keywords="(L2 cached)",
-                    documents=_convert_documents(
-                        cached_documents,
-                        request.max_documents
-                    ) if request.include_documents else [],
                     keyword_guide=keyword_guide,
                     processing_time_ms=round(processing_time_ms, 2)
                 )
@@ -517,10 +400,6 @@ async def keyword_extraction_guide(request: ComparisonRequest):
                 original_summary=request.summary,
                 search_method=cache.get_search_method_display("miss"),
                 extracted_keywords=extracted_keywords,
-                documents=_convert_documents(
-                    raw_documents,
-                    request.max_documents
-                ) if request.include_documents and raw_documents else [],
                 keyword_guide=keyword_guide,
                 processing_time_ms=round(processing_time_ms, 2)
             )
@@ -538,7 +417,7 @@ async def keyword_extraction_guide(request: ComparisonRequest):
 
 
 # ==========================================
-# API 4: 직접 임베딩 + 긴 가이드 생성
+# API 3: 직접 임베딩 + 긴 가이드 생성
 # ==========================================
 
 @router.post(
@@ -602,10 +481,6 @@ async def direct_full_guide(request: ComparisonRequest):
                 return DirectFullGuideResponse(
                     original_summary=request.summary,
                     search_method=cache.get_search_method_display("l1_hit"),
-                    documents=_convert_documents(
-                        cached_response.get("documents", []),
-                        request.max_documents
-                    ) if request.include_documents else [],
                     response_guide=response_guide,
                     processing_time_ms=round(processing_time_ms, 2)
                 )
@@ -655,10 +530,6 @@ async def direct_full_guide(request: ComparisonRequest):
                 return DirectFullGuideResponse(
                     original_summary=request.summary,
                     search_method=cache.get_search_method_display("l2_hit"),
-                    documents=_convert_documents(
-                        cached_documents,
-                        request.max_documents
-                    ) if request.include_documents else [],
                     response_guide=response_guide,
                     processing_time_ms=round(processing_time_ms, 2)
                 )
@@ -710,10 +581,6 @@ async def direct_full_guide(request: ComparisonRequest):
             response = DirectFullGuideResponse(
                 original_summary=request.summary,
                 search_method=cache.get_search_method_display("miss"),
-                documents=_convert_documents(
-                    raw_documents,
-                    request.max_documents
-                ) if request.include_documents and raw_documents else [],
                 response_guide=response_guide,
                 processing_time_ms=round(processing_time_ms, 2)
             )
