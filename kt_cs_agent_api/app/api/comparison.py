@@ -37,7 +37,7 @@ from app.agent.workflow import (
     run_keyword_search_only_async,
     run_response_guide_only_async
 )
-from app.agent.nodes import expand_query_async, detect_category_from_query
+from app.agent.nodes import expand_query_async, detect_category_with_llm
 from app.database import get_vector_db_manager
 from app.utils import request_limiter
 from app.utils.cache_helpers import (
@@ -104,11 +104,18 @@ async def direct_keyword_guide(request: ComparisonRequest):
         async with request_limiter.acquire():
             logger.info(f"[API] 직접 임베딩 + 핵심 가이드: '{request.summary[:50]}...'")
 
-            # 질문 정규화 (캐시 키 생성용)
-            normalized_query = await cache.get_normalized_query(request.summary, use_llm=True)
+            # ==========================================
+            # Step 1: 질문 확장 (먼저 수행 - 캐시 키 생성용)
+            # ==========================================
+            expanded_query = await expand_query_async(request.summary)
+            logger.info(f"[API] 확장된 쿼리: '{expanded_query[:80]}...'")
+
+            # 확장된 질문을 정규화하여 캐시 키로 사용
+            normalized_query = await cache.get_normalized_query(expanded_query, use_llm=True)
+            logger.info(f"[API] 정규화된 캐시 키: '{normalized_query[:50]}...'")
 
             # ==========================================
-            # Step 1: L1 캐시 확인 (전체 응답)
+            # Step 2: L1 캐시 확인 (전체 응답)
             # ==========================================
             cached_response = await cache.get_l1_cache(normalized_query)
             if cached_response:
@@ -130,7 +137,7 @@ async def direct_keyword_guide(request: ComparisonRequest):
                 )
 
             # ==========================================
-            # Step 2: L2 캐시 확인 (검색 결과만)
+            # Step 3: L2 캐시 확인 (검색 결과만)
             # ==========================================
             cached_documents = await cache.get_l2_cache(normalized_query, k=5)
 
@@ -177,20 +184,16 @@ async def direct_keyword_guide(request: ComparisonRequest):
                 )
 
             # ==========================================
-            # Step 3: 캐시 미스 - 질문 확장 후 전체 처리
+            # Step 4: 캐시 미스 - 카테고리 판별 후 검색
             # ==========================================
-            logger.info("[API] 캐시 미스 - 질문 확장 + 검색 + 가이드 생성 수행")
+            logger.info("[API] 캐시 미스 - 카테고리 판별 + 검색 + 가이드 생성 수행")
 
             try:
-                # 1. 원본 질문으로 카테고리 판별
-                categories = detect_category_from_query(request.summary)
-                logger.info(f"[API] 카테고리 판별: {categories or '전체'}")
+                # 1. 원본 질문으로 카테고리 판별 (LLM 사용)
+                categories = await detect_category_with_llm(request.summary)
+                logger.info(f"[API] 카테고리 판별 (LLM): {categories or '전체'}")
 
-                # 2. 질문 확장 (검색 품질 향상)
-                expanded_query = await expand_query_async(request.summary)
-                logger.info(f"[API] 확장된 쿼리: '{expanded_query[:80]}...'")
-
-                # 3. 확장된 쿼리 + 카테고리 필터로 검색
+                # 2. 확장된 쿼리 + 카테고리 필터로 검색 (확장은 이미 완료됨)
                 import asyncio
                 db_manager = get_vector_db_manager()
                 raw_documents = await asyncio.to_thread(
@@ -479,11 +482,18 @@ async def direct_full_guide(request: ComparisonRequest):
         async with request_limiter.acquire():
             logger.info(f"[API] 직접 임베딩 + 긴 가이드: '{request.summary[:50]}...'")
 
-            # 질문 정규화 (캐시 키 생성용)
-            normalized_query = await cache.get_normalized_query(request.summary, use_llm=True)
+            # ==========================================
+            # Step 1: 질문 확장 (먼저 수행 - 캐시 키 생성용)
+            # ==========================================
+            expanded_query = await expand_query_async(request.summary)
+            logger.info(f"[API] 확장된 쿼리: '{expanded_query[:80]}...'")
+
+            # 확장된 질문을 정규화하여 캐시 키로 사용
+            normalized_query = await cache.get_normalized_query(expanded_query, use_llm=True)
+            logger.info(f"[API] 정규화된 캐시 키: '{normalized_query[:50]}...'")
 
             # ==========================================
-            # Step 1: L1 캐시 확인 (전체 응답)
+            # Step 2: L1 캐시 확인 (전체 응답)
             # ==========================================
             cached_response = await cache.get_l1_cache(normalized_query)
             if cached_response:
@@ -507,7 +517,7 @@ async def direct_full_guide(request: ComparisonRequest):
                 )
 
             # ==========================================
-            # Step 2: L2 캐시 확인 (검색 결과만)
+            # Step 3: L2 캐시 확인 (검색 결과만)
             # ==========================================
             cached_documents = await cache.get_l2_cache(normalized_query, k=5)
 
@@ -556,20 +566,16 @@ async def direct_full_guide(request: ComparisonRequest):
                 )
 
             # ==========================================
-            # Step 3: 캐시 미스 - 질문 확장 후 전체 처리
+            # Step 4: 캐시 미스 - 카테고리 판별 후 검색
             # ==========================================
-            logger.info("[API] 캐시 미스 - 질문 확장 + 검색 + 긴 가이드 생성 수행")
+            logger.info("[API] 캐시 미스 - 카테고리 판별 + 검색 + 긴 가이드 생성 수행")
 
             try:
-                # 1. 원본 질문으로 카테고리 판별
-                categories = detect_category_from_query(request.summary)
-                logger.info(f"[API] 카테고리 판별: {categories or '전체'}")
+                # 1. 원본 질문으로 카테고리 판별 (LLM 사용)
+                categories = await detect_category_with_llm(request.summary)
+                logger.info(f"[API] 카테고리 판별 (LLM): {categories or '전체'}")
 
-                # 2. 질문 확장 (검색 품질 향상)
-                expanded_query = await expand_query_async(request.summary)
-                logger.info(f"[API] 확장된 쿼리: '{expanded_query[:80]}...'")
-
-                # 3. 확장된 쿼리 + 카테고리 필터로 검색
+                # 2. 확장된 쿼리 + 카테고리 필터로 검색 (확장은 이미 완료됨)
                 import asyncio
                 db_manager = get_vector_db_manager()
                 raw_documents = await asyncio.to_thread(

@@ -723,7 +723,6 @@ def detect_category_from_query(query: str) -> list:
 async def detect_category_with_llm(query: str) -> list:
     """
     LLM을 사용하여 질문의 카테고리를 판별합니다.
-    키워드 기반 판별이 불확실할 때 사용합니다.
 
     Args:
         query: 사용자 질문
@@ -734,26 +733,29 @@ async def detect_category_with_llm(query: str) -> list:
     import asyncio
 
     llm = ChatOpenAI(
-        model=settings.ANALYZER_MODEL,
+        model=settings.ANSWER_MODEL,
         api_key=settings.OPENAI_API_KEY,
         temperature=0,
         max_tokens=50,
     )
 
-    prompt = ChatPromptTemplate.from_template("""
-질문을 분석하여 관련 카테고리를 판별하세요.
+    prompt = ChatPromptTemplate.from_template("""통신사 고객센터 질문을 분석하여 해당하는 카테고리를 판별하세요.
 
-카테고리:
-- mobile: 모바일 요금제, 휴대폰, 5G/LTE, 데이터, 통화 관련
-- internet: 인터넷 요금제, 광랜, 와이파이, 회선 관련
-- tv: TV 요금제, IPTV, 채널, VOD 관련
-- bundle: 결합 요금제, 가족결합, 묶음할인 관련
-- membership: 멤버십, 포인트, VIP 혜택 관련
+카테고리 목록:
+- mobile: 모바일/휴대폰 요금제, 5G, LTE, 3G, 데이터, 통화, 문자, 로밍
+- internet: 인터넷 요금제, 광랜, 기가인터넷, 와이파이, 회선 속도
+- tv: TV 요금제, IPTV, 올레tv, 지니tv, 채널, VOD, 셋톱박스
+- bundle: 결합할인, 뭉치면 올레, 가족결합, 묶음할인, 패밀리
+- membership: 멤버십, 포인트, VIP, 등급 혜택, 쿠폰
 
 질문: {query}
 
-해당하는 카테고리만 쉼표로 구분하여 출력하세요. 해당 없으면 "all"을 출력하세요.
-출력:""")
+규칙:
+1. 해당하는 카테고리만 출력 (예: mobile 또는 mobile,bundle)
+2. 여러 카테고리면 쉼표로 구분
+3. 판단 불가시 all 출력
+
+카테고리:""")
 
     chain = prompt | llm | StrOutputParser()
 
