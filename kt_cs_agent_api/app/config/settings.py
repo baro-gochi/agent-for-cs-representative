@@ -177,6 +177,12 @@ class Settings(BaseSettings):
         default="gpt-4o-mini",
         description="질문 정규화용 LLM 모델"
     )
+
+    # 캐시 초기화 여부
+    RESET_CACHE: bool = Field(
+        default=False,
+        description="서버 시작 시 캐시 초기화 여부"
+    )
     
     # ==========================================
     # 유효성 검증
