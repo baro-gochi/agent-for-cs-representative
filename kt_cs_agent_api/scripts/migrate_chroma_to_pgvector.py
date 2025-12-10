@@ -115,15 +115,23 @@ def extract_all_documents_from_chroma(chroma: Chroma) -> List[Dict[str, Any]]:
         result = collection.get(
             limit=batch_size,
             offset=offset,
-            include=["documents", "metadatas", "embeddings"]
+            include=["documents", "metadatas"]
         )
 
         for i in range(len(result["ids"])):
+            # 안전하게 값 추출
+            content = ""
+            if result["documents"] is not None and len(result["documents"]) > i:
+                content = result["documents"][i] or ""
+
+            metadata = {}
+            if result["metadatas"] is not None and len(result["metadatas"]) > i:
+                metadata = result["metadatas"][i] or {}
+
             doc_data = {
                 "id": result["ids"][i],
-                "content": result["documents"][i] if result["documents"] else "",
-                "metadata": result["metadatas"][i] if result["metadatas"] else {},
-                "embedding": result["embeddings"][i] if result["embeddings"] else None
+                "content": content,
+                "metadata": metadata,
             }
             all_documents.append(doc_data)
 
