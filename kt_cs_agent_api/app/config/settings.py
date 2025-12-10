@@ -37,16 +37,51 @@ class Settings(BaseSettings):
     )
     
     # ==========================================
-    # [필수] 벡터 데이터베이스 설정
+    # [선택] 벡터 데이터베이스 설정
     # ==========================================
-    CHROMA_DB_PATH: str = Field(
-        ...,  # 필수값
+    # 벡터 DB 타입 선택: "chroma" 또는 "pgvector"
+    VECTOR_DB_TYPE: str = Field(
+        default="chroma",
+        description="벡터 DB 타입 (chroma 또는 pgvector)"
+    )
+
+    # ChromaDB 설정 (VECTOR_DB_TYPE=chroma일 때 사용)
+    CHROMA_DB_PATH: Optional[str] = Field(
+        default=None,
         description="ChromaDB 저장 경로"
     )
-    
+
     CHROMA_COLLECTION_NAME: str = Field(
         default="kt_terms",
-        description="ChromaDB 컬렉션 이름"
+        description="벡터 DB 컬렉션/테이블 이름"
+    )
+
+    # ==========================================
+    # [선택] PostgreSQL + pgvector 설정
+    # ==========================================
+    POSTGRES_HOST: str = Field(
+        default="localhost",
+        description="PostgreSQL 서버 호스트"
+    )
+
+    POSTGRES_PORT: int = Field(
+        default=5432,
+        description="PostgreSQL 서버 포트"
+    )
+
+    POSTGRES_DB: str = Field(
+        default="vectordb",
+        description="PostgreSQL 데이터베이스 이름"
+    )
+
+    POSTGRES_USER: str = Field(
+        default="postgres",
+        description="PostgreSQL 사용자"
+    )
+
+    POSTGRES_PASSWORD: Optional[str] = Field(
+        default=None,
+        description="PostgreSQL 비밀번호"
     )
     
     # ==========================================
@@ -187,6 +222,15 @@ class Settings(BaseSettings):
     # ==========================================
     # 유효성 검증
     # ==========================================
+    @field_validator('VECTOR_DB_TYPE')
+    @classmethod
+    def validate_vector_db_type(cls, v: str) -> str:
+        """벡터 DB 타입 유효성 검증"""
+        allowed = ['chroma', 'pgvector']
+        if v.lower() not in allowed:
+            raise ValueError(f"VECTOR_DB_TYPE은 {allowed} 중 하나여야 합니다.")
+        return v.lower()
+
     @field_validator('EMBEDDING_DEVICE')
     @classmethod
     def validate_device(cls, v: str) -> str:
