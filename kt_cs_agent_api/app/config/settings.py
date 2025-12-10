@@ -126,10 +126,56 @@ class Settings(BaseSettings):
         default="INFO",
         description="로그 레벨"
     )
-    
+
     LOG_FILE_PATH: Optional[str] = Field(
         default=None,
         description="로그 파일 경로"
+    )
+
+    # ==========================================
+    # [선택] Redis 캐싱 설정
+    # ==========================================
+    REDIS_HOST: str = Field(
+        default="localhost",
+        description="Redis 서버 호스트"
+    )
+
+    REDIS_PORT: int = Field(
+        default=6379,
+        description="Redis 서버 포트"
+    )
+
+    REDIS_DB: int = Field(
+        default=0,
+        description="Redis 데이터베이스 번호"
+    )
+
+    REDIS_PASSWORD: Optional[str] = Field(
+        default=None,
+        description="Redis 비밀번호 (선택)"
+    )
+
+    CACHE_ENABLED: bool = Field(
+        default=True,
+        description="캐싱 활성화 여부"
+    )
+
+    # 레벨1: 질문 → 전체 응답 캐싱 TTL (초)
+    CACHE_L1_TTL: int = Field(
+        default=3600,
+        description="레벨1 캐시 TTL (기본 1시간)"
+    )
+
+    # 레벨2: 벡터 검색 결과 캐싱 TTL (초)
+    CACHE_L2_TTL: int = Field(
+        default=7200,
+        description="레벨2 캐시 TTL (기본 2시간)"
+    )
+
+    # 질문 정규화용 LLM 모델 (저비용 모델 권장)
+    NORMALIZER_MODEL: str = Field(
+        default="gpt-4o-mini",
+        description="질문 정규화용 LLM 모델"
     )
     
     # ==========================================
