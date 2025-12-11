@@ -516,7 +516,7 @@ def keyword_guide_node(state: AgentState) -> dict:
     # -----------------------------------------
     llm = ChatOpenAI(
         # model=settings.ANSWER_MODEL,
-        model="gpt-4o-mini",
+        model=settings.RESPONSE_MODEL,
         api_key=settings.OPENAI_API_KEY,
         temperature=0,
         # max_completion_tokens=300,
