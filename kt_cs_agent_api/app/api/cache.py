@@ -58,28 +58,19 @@ class ApiType(str, Enum):
     ALL = "all"
 
 
-# API별 캐시 프리픽스 매핑
-API_CACHE_PREFIXES = {
-    ApiType.CONSULTATION: {
-        "l1": "consultation:",
-        "l2": "keyword:",
-        "description": "/consultation/assist - 키워드 추출 + 긴 가이드"
-    },
-    ApiType.DIRECT_KEYWORD: {
-        "l1": "direct_keyword:",
-        "l2": "direct:",
-        "description": "/comparison/direct-keyword - 직접 임베딩 + 핵심 가이드"
-    },
-    ApiType.KEYWORD_EXTRACTION: {
-        "l1": "keyword_extraction:",
-        "l2": "keyword:",
-        "description": "/comparison/keyword-extraction - 키워드 추출 + 핵심 가이드"
-    },
-    ApiType.DIRECT_FULL: {
-        "l1": "direct_full_guide:",
-        "l2": "direct:",
-        "description": "/comparison/direct-full-guide - 직접 임베딩 + 긴 가이드"
-    }
+# 실제 Redis 캐시 프리픽스 (cache_manager에서 사용하는 것과 동일)
+CACHE_PREFIXES = {
+    "l1": "l1:response:",   # L1 캐시 (전체 응답)
+    "l2": "l2:search:",     # L2 캐시 (검색 결과)
+    "norm": "norm:query:",  # 정규화 쿼리 캐시
+}
+
+# API 타입별 설명 (통계 표시용)
+API_DESCRIPTIONS = {
+    ApiType.CONSULTATION: "/consultation/assist - 직접 임베딩 + 핵심 가이드",
+    ApiType.DIRECT_KEYWORD: "/comparison/direct-keyword - 직접 임베딩 + 핵심 가이드",
+    ApiType.KEYWORD_EXTRACTION: "/comparison/keyword-extraction - 키워드 추출 + 핵심 가이드",
+    ApiType.DIRECT_FULL: "/comparison/direct-full-guide - 직접 임베딩 + 긴 가이드",
 }
 
 # 캐시 제한 설정
@@ -168,7 +159,7 @@ class DetailedCacheStatsResponse(BaseModel):
 
 **반환 정보:**
 - 전체 L1/L2 캐시 개수
-- API별 캐시 개수 (consultation, direct_keyword, keyword_extraction, direct_full)
+- 정규화 쿼리 캐시 개수
 - 메모리 사용량
 - TTL 설정
 - 캐시 제한 설정
@@ -189,42 +180,38 @@ async def get_cache_stats() -> DetailedCacheStatsResponse:
         # 기본 통계
         stats = await cache_manager.get_cache_stats()
 
-        # API별 통계 수집
-        api_stats = {}
-        total_l1 = 0
-        total_l2 = 0
+        # 캐시 유형별 통계 수집
+        l1_count = await _count_keys_by_prefix(CACHE_PREFIXES["l1"])
+        l2_count = await _count_keys_by_prefix(CACHE_PREFIXES["l2"])
+        norm_count = await _count_keys_by_prefix(CACHE_PREFIXES["norm"])
 
-        for api_type, prefixes in API_CACHE_PREFIXES.items():
-            l1_count = await _count_keys_by_prefix(prefixes["l1"])
-            l2_count = await _count_keys_by_prefix(prefixes["l2"])
-
-            api_stats[api_type.value] = {
-                "description": prefixes["description"],
-                "l1_prefix": prefixes["l1"],
-                "l2_prefix": prefixes["l2"],
-                "l1_count": l1_count,
-                "l2_count": l2_count
+        api_stats = {
+            "cache_types": {
+                "l1_response": {
+                    "prefix": CACHE_PREFIXES["l1"],
+                    "count": l1_count,
+                    "description": "전체 응답 캐시 (정규화된 질문 → 응답)"
+                },
+                "l2_search": {
+                    "prefix": CACHE_PREFIXES["l2"],
+                    "count": l2_count,
+                    "description": "검색 결과 캐시 (쿼리 → 문서 목록)"
+                },
+                "norm_query": {
+                    "prefix": CACHE_PREFIXES["norm"],
+                    "count": norm_count,
+                    "description": "정규화 쿼리 캐시 (원본 → 정규화)"
+                }
+            },
+            "api_endpoints": {
+                api_type.value: desc for api_type, desc in API_DESCRIPTIONS.items()
             }
-
-            total_l1 += l1_count
-            # L2는 공유될 수 있으므로 별도 계산
-            if prefixes["l2"] == "keyword:":
-                if "keyword_l2_counted" not in api_stats:
-                    total_l2 += l2_count
-                    api_stats["keyword_l2_counted"] = True
-            elif prefixes["l2"] == "direct:":
-                if "direct_l2_counted" not in api_stats:
-                    total_l2 += l2_count
-                    api_stats["direct_l2_counted"] = True
-
-        # 임시 플래그 제거
-        api_stats.pop("keyword_l2_counted", None)
-        api_stats.pop("direct_l2_counted", None)
+        }
 
         return DetailedCacheStatsResponse(
             connected=True,
-            total_l1_count=total_l1,
-            total_l2_count=total_l2,
+            total_l1_count=l1_count,
+            total_l2_count=l2_count,
             api_stats=api_stats,
             used_memory=stats.get("used_memory", "N/A"),
             used_memory_peak=stats.get("used_memory_peak", "N/A"),
@@ -244,28 +231,27 @@ async def get_cache_stats() -> DetailedCacheStatsResponse:
 @router.post(
     "/invalidate/{api_type}",
     response_model=CacheInvalidateByApiResponse,
-    summary="API별 캐시 무효화",
+    summary="캐시 무효화",
     description="""
-특정 API의 캐시를 무효화합니다.
+캐시를 무효화합니다.
 
 **API 타입:**
-- `consultation`: /consultation/assist API 캐시
-- `direct_keyword`: /comparison/direct-keyword API 캐시
-- `keyword_extraction`: /comparison/keyword-extraction API 캐시
-- `direct_full`: /comparison/direct-full-guide API 캐시
-- `all`: 모든 API 캐시
+- `all`: 모든 캐시 무효화 (권장)
+- `consultation`, `direct_keyword`, `keyword_extraction`, `direct_full`: 현재 구조에서는 모두 동일하게 전체 캐시 삭제
 
 **레벨:**
-- `l1`: L1 캐시만 무효화
-- `l2`: L2 캐시만 무효화
-- `all`: L1, L2 모두 무효화
+- `l1`: L1 캐시만 무효화 (전체 응답 캐시)
+- `l2`: L2 캐시만 무효화 (검색 결과 캐시)
+- `all`: L1, L2, 정규화 캐시 모두 무효화
+
+**참고:** 현재 캐시 구조에서는 API별로 캐시가 분리되지 않고 공유됩니다.
     """
 )
 async def invalidate_cache_by_api(
     api_type: ApiType,
     request: CacheInvalidateByApiRequest
 ) -> CacheInvalidateByApiResponse:
-    """API별 캐시 무효화"""
+    """캐시 무효화"""
     try:
         if not cache_manager.is_connected():
             await cache_manager.connect()
@@ -279,28 +265,28 @@ async def invalidate_cache_by_api(
 
         l1_deleted = 0
         l2_deleted = 0
+        norm_deleted = 0
 
-        if api_type == ApiType.ALL:
-            # 모든 API 캐시 무효화
-            for api, prefixes in API_CACHE_PREFIXES.items():
-                if request.level in ("l1", "all"):
-                    l1_deleted += await _delete_keys_by_prefix(prefixes["l1"])
-                if request.level in ("l2", "all"):
-                    l2_deleted += await _delete_keys_by_prefix(prefixes["l2"])
-        else:
-            # 특정 API 캐시 무효화
-            prefixes = API_CACHE_PREFIXES[api_type]
-            if request.level in ("l1", "all"):
-                l1_deleted = await _delete_keys_by_prefix(prefixes["l1"])
-            if request.level in ("l2", "all"):
-                l2_deleted = await _delete_keys_by_prefix(prefixes["l2"])
+        # 캐시 레벨에 따라 삭제
+        if request.level in ("l1", "all"):
+            l1_deleted = await _delete_keys_by_prefix(CACHE_PREFIXES["l1"])
+        if request.level in ("l2", "all"):
+            l2_deleted = await _delete_keys_by_prefix(CACHE_PREFIXES["l2"])
+        if request.level == "all":
+            norm_deleted = await _delete_keys_by_prefix(CACHE_PREFIXES["norm"])
+
+        total_deleted = l1_deleted + l2_deleted + norm_deleted
+        message = f"캐시 무효화 완료 - L1: {l1_deleted}개, L2: {l2_deleted}개"
+        if norm_deleted > 0:
+            message += f", 정규화: {norm_deleted}개"
+        message += " 삭제됨"
 
         return CacheInvalidateByApiResponse(
             success=True,
             api_type=api_type.value,
             l1_deleted=l1_deleted,
             l2_deleted=l2_deleted,
-            message=f"캐시 무효화 완료 - L1: {l1_deleted}개, L2: {l2_deleted}개 삭제됨"
+            message=message
         )
 
     except Exception as e:
@@ -347,54 +333,47 @@ async def cleanup_cache(request: CacheCleanupRequest) -> CacheCleanupResponse:
                 message="Redis에 연결되어 있지 않습니다."
             )
 
+        # 정리 전 카운트
+        l1_count_before = await _count_keys_by_prefix(CACHE_PREFIXES["l1"])
+        l2_count_before = await _count_keys_by_prefix(CACHE_PREFIXES["l2"])
+
         before_counts = {
-            "l1": {},
-            "l2": {}
+            "l1": {"total": l1_count_before},
+            "l2": {"total": l2_count_before}
         }
         deleted_counts = {
-            "l1": {},
-            "l2": {}
+            "l1": {"total": 0},
+            "l2": {"total": 0}
         }
 
         # L1 캐시 정리
-        for api_type, prefixes in API_CACHE_PREFIXES.items():
-            l1_prefix = prefixes["l1"]
-            l1_count = await _count_keys_by_prefix(l1_prefix)
-            before_counts["l1"][api_type.value] = l1_count
+        if l1_count_before > request.l1_max_count:
+            to_delete = l1_count_before - request.l1_max_count
+            if not request.dry_run:
+                deleted = await _delete_oldest_keys(CACHE_PREFIXES["l1"], to_delete)
+                deleted_counts["l1"]["total"] = deleted
+            else:
+                deleted_counts["l1"]["total"] = to_delete
 
-            if l1_count > request.l1_max_count:
-                to_delete = l1_count - request.l1_max_count
-                if not request.dry_run:
-                    deleted = await _delete_oldest_keys(l1_prefix, to_delete)
-                    deleted_counts["l1"][api_type.value] = deleted
-                else:
-                    deleted_counts["l1"][api_type.value] = to_delete
-
-        # L2 캐시 정리 (keyword와 direct 프리픽스만)
-        l2_prefixes = {"keyword:": 0, "direct:": 0}
-        for prefix in l2_prefixes.keys():
-            l2_count = await _count_keys_by_prefix(prefix)
-            before_counts["l2"][prefix] = l2_count
-
-            if l2_count > request.l2_max_count:
-                to_delete = l2_count - request.l2_max_count
-                if not request.dry_run:
-                    deleted = await _delete_oldest_keys(prefix, to_delete)
-                    deleted_counts["l2"][prefix] = deleted
-                else:
-                    deleted_counts["l2"][prefix] = to_delete
+        # L2 캐시 정리
+        if l2_count_before > request.l2_max_count:
+            to_delete = l2_count_before - request.l2_max_count
+            if not request.dry_run:
+                deleted = await _delete_oldest_keys(CACHE_PREFIXES["l2"], to_delete)
+                deleted_counts["l2"]["total"] = deleted
+            else:
+                deleted_counts["l2"]["total"] = to_delete
 
         # 정리 후 카운트
-        after_counts = {"l1": {}, "l2": {}}
         if not request.dry_run:
-            for api_type, prefixes in API_CACHE_PREFIXES.items():
-                after_counts["l1"][api_type.value] = await _count_keys_by_prefix(prefixes["l1"])
-            for prefix in l2_prefixes.keys():
-                after_counts["l2"][prefix] = await _count_keys_by_prefix(prefix)
+            after_counts = {
+                "l1": {"total": await _count_keys_by_prefix(CACHE_PREFIXES["l1"])},
+                "l2": {"total": await _count_keys_by_prefix(CACHE_PREFIXES["l2"])}
+            }
         else:
             after_counts = before_counts  # dry run이면 변경 없음
 
-        total_deleted = sum(deleted_counts["l1"].values()) + sum(deleted_counts["l2"].values())
+        total_deleted = deleted_counts["l1"]["total"] + deleted_counts["l2"]["total"]
 
         return CacheCleanupResponse(
             success=True,
@@ -459,6 +438,53 @@ async def normalize_test(request: NormalizeTestRequest) -> NormalizeTestResponse
     except Exception as e:
         logger.error(f"[CacheAPI] 정규화 테스트 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===========================================
+# 헬퍼 함수
+@router.post(
+    "/invalidate",
+    response_model=CacheInvalidateByApiResponse,
+    summary="전체 캐시 무효화 (간편)",
+    description="""
+모든 캐시를 무효화합니다. `/invalidate/all`의 간편 버전입니다.
+
+L1 (응답 캐시), L2 (검색 캐시), 정규화 캐시를 모두 삭제합니다.
+    """
+)
+async def invalidate_all_cache() -> CacheInvalidateByApiResponse:
+    """전체 캐시 무효화"""
+    try:
+        if not cache_manager.is_connected():
+            await cache_manager.connect()
+
+        if not cache_manager.is_connected():
+            return CacheInvalidateByApiResponse(
+                success=False,
+                api_type="all",
+                message="Redis에 연결되어 있지 않습니다."
+            )
+
+        l1_deleted = await _delete_keys_by_prefix(CACHE_PREFIXES["l1"])
+        l2_deleted = await _delete_keys_by_prefix(CACHE_PREFIXES["l2"])
+        norm_deleted = await _delete_keys_by_prefix(CACHE_PREFIXES["norm"])
+
+        total = l1_deleted + l2_deleted + norm_deleted
+        return CacheInvalidateByApiResponse(
+            success=True,
+            api_type="all",
+            l1_deleted=l1_deleted,
+            l2_deleted=l2_deleted,
+            message=f"전체 캐시 무효화 완료 - L1: {l1_deleted}개, L2: {l2_deleted}개, 정규화: {norm_deleted}개 삭제됨 (총 {total}개)"
+        )
+
+    except Exception as e:
+        logger.error(f"[CacheAPI] 전체 무효화 오류: {e}")
+        return CacheInvalidateByApiResponse(
+            success=False,
+            api_type="all",
+            message=str(e)
+        )
 
 
 # ===========================================
