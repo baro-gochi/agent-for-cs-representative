@@ -106,12 +106,12 @@ class Settings(BaseSettings):
     )
     
     RESPONSE_MODEL: str = Field(
-        default="gpt-4o-mini",
+        default="gpt-5-nano",
         description="응답 생성용 LLM 모델"
     )
 
     ANSWER_MODEL: str = Field(
-        default="gpt-4o-mini",
+        default="gpt-5-nano",
         description="답변 생성용 LLM 모델"
     )
 

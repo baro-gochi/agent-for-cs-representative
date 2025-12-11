@@ -79,22 +79,28 @@ class ConsultationRequest(BaseModel):
     """
     신입 상담원용 상담 요청
 
-    상담 내용을 입력받아 키워드 추출, 문서 검색, 대응방안 생성을
-    모두 수행하는 Full Agent API의 요청 모델입니다.
+    실시간 상담 중 고객 문의 내용을 요약하여 전송합니다.
+    STT 결과 또는 상담원이 직접 요약한 내용을 입력받습니다.
     """
     summary: str = Field(
         ...,
         min_length=5,
         max_length=2000,
-        description="상담 내용 요약",
-        json_schema_extra={"example": "인터넷 약정 해지 시 위약금 계산법이 궁금합니다."}
+        description="실시간 상담 내용 요약 (STT 또는 상담원 입력)",
+        json_schema_extra={"example": "[인터넷] 고객이 기가인터넷 36개월 약정 상품을 18개월 사용 후 해지 희망. 위약금 산정 방식과 잔여 할인반환금 문의."}
     )
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "3년 약정 기간 중 14개월 사용 후 중도 해지 시 발생하는 위약금 및 할인 반환금 산정 상세 내역 문의."
+                    "summary": "[모바일] 5G 프리미어 에센셜 요금제 24개월 약정 중 8개월 사용 고객. 요금제 변경 시 위약금 발생 여부와 변경 가능한 요금제 목록 문의."
+                },
+                {
+                    "summary": "[결합] 인터넷+TV+모바일 가족결합 상품 이용 중. 모바일 1회선 해지 시 결합할인 유지 여부와 재약정 조건 문의."
+                },
+                {
+                    "summary": "[TV] 올레tv 스카이라이프 셋톱박스 교체 요청. 현재 약정 상태 확인 및 최신 장비 교체 절차 안내 필요."
                 }
             ]
         }
@@ -103,10 +109,10 @@ class ConsultationRequest(BaseModel):
 
 class ConsultationResponse(BaseModel):
     """
-    신입 상담원용 상담 응답
+    상담 지원 응답 (키워드 추출 + 상세 가이드 방식)
 
-    상담 요청에 대한 전체 처리 결과를 담습니다.
-    response_guide는 JSON 구조화된 데이터로, 프론트엔드에서 자유롭게 렌더링할 수 있습니다.
+    레거시 consultation 방식의 응답 모델입니다.
+    response_guide는 구조화된 상세 응대 가이드를 제공합니다.
     """
     # 입력 정보
     original_summary: str = Field(
@@ -117,35 +123,35 @@ class ConsultationResponse(BaseModel):
     # 분석 결과
     extracted_keywords: str = Field(
         ...,
-        description="추출된 검색 키워드",
-        json_schema_extra={"example": "약정 해지 위약금 계산"}
+        description="LLM이 추출한 검색 키워드",
+        json_schema_extra={"example": "5G 프리미어 에센셜 24개월 약정 요금제 변경 위약금"}
     )
     target_document: str = Field(
         ...,
-        description="선택된 대상 문서",
-        json_schema_extra={"example": "인터넷이용약관"}
+        description="선택된 대상 문서 (현재 미사용)",
+        json_schema_extra={"example": "없음"}
     )
 
     # 대응방안 (JSON 구조화)
     response_guide: Dict[str, Any] = Field(
         ...,
-        description="신입 상담원을 위한 대응방안 (JSON 구조화)",
+        description="구조화된 상세 응대 가이드",
         json_schema_extra={"example": {
             "announcement": {
                 "title": "안내 멘트",
-                "items": ["고객님, 약정 해지 관련 안내드리겠습니다."]
+                "items": ["고객님, 현재 5G 프리미어 에센셜 요금제 24개월 약정으로 이용 중이십니다.", "요금제 변경 관련 안내드리겠습니다."]
             },
             "cautions": {
                 "title": "주의사항",
-                "items": ["중도 해지 시 위약금이 발생합니다."]
+                "items": ["약정 기간 내 하위 요금제로 변경 시 위약금이 발생합니다.", "동일 또는 상위 요금제 변경은 위약금 없이 가능합니다."]
             },
             "check_required": {
                 "title": "확인 필요 사항",
-                "items": ["정확한 가입일자 확인"]
+                "items": ["현재 약정 시작일 및 잔여 기간 확인", "결합상품 연동 여부 확인"]
             },
             "next_steps": {
                 "title": "다음 단계 안내",
-                "items": ["해지 신청서 작성 안내"]
+                "items": ["변경 희망 요금제 선택 후 변경 신청", "위약금 발생 시 청구서에 포함되어 안내"]
             }
         }}
     )
@@ -160,40 +166,42 @@ class ConsultationResponse(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "original_summary": "인터넷 약정 해지 시 위약금 계산법이 궁금합니다.",
-                    "extracted_keywords": "약정 해지 위약금 계산",
-                    "target_document": "인터넷이용약관",
+                    "original_summary": "[모바일] 5G 프리미어 에센셜 요금제 24개월 약정 중 8개월 사용 고객. 요금제 변경 시 위약금 발생 여부와 변경 가능한 요금제 목록 문의.",
+                    "extracted_keywords": "5G 프리미어 에센셜 24개월 약정 요금제 변경 위약금",
+                    "target_document": "없음",
                     "response_guide": {
                         "announcement": {
                             "title": "안내 멘트",
                             "items": [
-                                "고객님, 약정 해지 관련 안내드리겠습니다.",
-                                "현재 사용 중이신 상품은 24개월 약정 상품입니다."
+                                "고객님, 현재 5G 프리미어 에센셜 요금제 24개월 약정으로 이용 중이십니다.",
+                                "8개월 사용 기준, 잔여 약정 기간은 16개월입니다."
                             ]
                         },
                         "cautions": {
                             "title": "주의사항",
                             "items": [
-                                "중도 해지 시 위약금이 발생합니다.",
-                                "위약금은 잔여 약정 기간에 따라 산정됩니다."
+                                "하위 요금제로 변경 시 잔여 기간에 대한 할인반환금이 발생합니다.",
+                                "위약금 = 잔여개월 × 월 할인액으로 산정됩니다."
                             ]
                         },
                         "check_required": {
                             "title": "확인 필요 사항",
                             "items": [
-                                "정확한 가입일자 확인",
-                                "결합상품 여부 확인"
+                                "정확한 가입일자 및 약정 시작일 확인",
+                                "단말기 할부 잔여금 여부 확인",
+                                "가족결합 또는 인터넷 결합 여부 확인"
                             ]
                         },
                         "next_steps": {
                             "title": "다음 단계 안내",
                             "items": [
-                                "해지 신청서 작성 안내",
-                                "위약금 정산 절차 안내"
+                                "변경 가능 요금제 목록 안내",
+                                "위약금 예상 금액 사전 안내",
+                                "고객 동의 후 요금제 변경 처리"
                             ]
                         }
                     },
-                    "processing_time_ms": 1234.5
+                    "processing_time_ms": 2350.5
                 }
             ]
         }
@@ -495,20 +503,29 @@ class StructuredKeywordGuide(BaseModel):
 class ComparisonRequest(BaseModel):
     """
     비교용 API 공통 요청 모델
+
+    실시간 상담 중 고객 문의 내용을 요약하여 전송합니다.
+    카테고리 태그([모바일], [인터넷] 등)를 포함하면 카테고리 판별 정확도가 향상됩니다.
     """
     summary: str = Field(
         ...,
         min_length=5,
         max_length=2000,
-        description="상담 내용 요약",
-        json_schema_extra={"example": "인터넷 약정 해지 시 위약금 계산법이 궁금합니다."}
+        description="실시간 상담 내용 요약 (STT 또는 상담원 입력)",
+        json_schema_extra={"example": "[인터넷] 기가인터넷 슬림 36개월 약정 고객, 20개월 사용 후 타사 이동 희망. 위약금과 장비 반납 절차 문의."}
     )
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "3년 약정 기간 중 14개월 사용 후 중도 해지 시 위약금 문의"
+                    "summary": "[모바일] 5G 슈퍼플랜 베이직 24개월 약정 중 12개월 사용. 해외 장기체류로 인한 일시정지 가능 여부 및 약정 기간 영향 문의."
+                },
+                {
+                    "summary": "[TV] 올레tv 스카이라이프 프리미엄 채널 해지 후 기본형으로 변경 요청. 월 요금 차이와 위약금 발생 여부 확인."
+                },
+                {
+                    "summary": "[결합] 온가족플랜 4회선 결합 중 1회선 번호이동 예정. 결합할인 유지 조건과 잔여 회선 요금 변동 안내 필요."
                 }
             ]
         }
@@ -559,10 +576,10 @@ class DirectSearchResponse(BaseModel):
 
 class KeywordGuideResponse(BaseModel):
     """
-    핵심 키워드 가이드 응답
+    핵심 키워드 가이드 응답 (메인 응답 형식)
 
-    API 2, 3: 핵심 키워드 기반 간결 가이드 생성용
-    keyword_guide는 JSON 구조화된 데이터로, 프론트엔드에서 자유롭게 렌더링할 수 있습니다.
+    /consultation/assist와 비교용 API에서 공통으로 사용하는 응답 모델입니다.
+    상담원이 직접 말로 풀어서 설명할 수 있도록 짧은 키워드/요점 형태로 제공됩니다.
     """
     original_summary: str = Field(
         ...,
@@ -581,8 +598,9 @@ class KeywordGuideResponse(BaseModel):
         description="핵심 키워드 기반 간결 가이드 (JSON 구조화)",
         json_schema_extra={"example": {
             "guide_items": [
-                {"topic": "요금제", "points": ["5G 스탠다드 월 69,000원", "데이터 무제한"]},
-                {"topic": "위약금", "points": ["24개월 약정", "잔여개월 x 할인액"]}
+                {"topic": "약정 현황", "points": ["36개월 약정 중 20개월 사용", "잔여 16개월"]},
+                {"topic": "위약금 산정", "points": ["잔여개월 × 월 할인액", "기가인터넷 슬림 월 5,500원 할인", "예상 위약금 약 88,000원"]},
+                {"topic": "장비 반납", "points": ["공유기 반납 필수", "미반납 시 장비비 청구"]}
             ]
         }}
     )
@@ -595,16 +613,18 @@ class KeywordGuideResponse(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "original_summary": "인터넷 해지 위약금 문의",
+                    "original_summary": "[인터넷] 기가인터넷 슬림 36개월 약정 고객, 20개월 사용 후 타사 이동 희망. 위약금과 장비 반납 절차 문의.",
                     "search_method": "direct_embedding",
                     "extracted_keywords": None,
                     "keyword_guide": {
                         "guide_items": [
-                            {"topic": "위약금", "points": ["24개월 약정", "잔여개월 x 할인액", "최대 300,000원"]},
-                            {"topic": "확인사항", "points": ["가입일 확인 필요", "결합상품 여부 체크"]}
+                            {"topic": "약정 현황", "points": ["36개월 약정 중 20개월 사용", "잔여 약정기간 16개월"]},
+                            {"topic": "위약금 산정", "points": ["위약금 = 잔여개월 × 월 할인액", "기가인터넷 슬림 월 5,500원 할인 적용 시", "예상 위약금: 16 × 5,500 = 88,000원"]},
+                            {"topic": "장비 반납", "points": ["KT 공유기 반납 필수", "미반납 시 장비비 별도 청구", "가까운 KT플라자 또는 택배 반납 가능"]},
+                            {"topic": "타사 이동 절차", "points": ["번호이동 예약 후 자동 해지", "해지 완료까지 3~5영업일 소요"]}
                         ]
                     },
-                    "processing_time_ms": 567.8
+                    "processing_time_ms": 1850.5
                 }
             ]
         }
@@ -613,10 +633,10 @@ class KeywordGuideResponse(BaseModel):
 
 class DirectFullGuideResponse(BaseModel):
     """
-    직접 임베딩 + 긴 가이드 응답
+    상세 가이드 응답 (직접 임베딩 + 구조화된 응대 가이드)
 
-    API 4: 직접 임베딩 검색 후 구조화된 가이드 생성용
-    response_guide는 JSON 구조화된 데이터로, 프론트엔드에서 자유롭게 렌더링할 수 있습니다.
+    비교용 API에서 사용하는 상세 응대 가이드 응답 모델입니다.
+    완성된 문장 형태의 응대 스크립트를 제공합니다.
     """
     original_summary: str = Field(
         ...,
@@ -628,12 +648,12 @@ class DirectFullGuideResponse(BaseModel):
     )
     response_guide: Dict[str, Any] = Field(
         ...,
-        description="신입 상담원을 위한 대응방안 (JSON 구조화)",
+        description="구조화된 상세 응대 가이드",
         json_schema_extra={"example": {
-            "announcement": {"title": "안내 멘트", "items": ["고객님, 안내드리겠습니다."]},
-            "cautions": {"title": "주의사항", "items": ["위약금이 발생합니다."]},
-            "check_required": {"title": "확인 필요 사항", "items": ["가입일 확인"]},
-            "next_steps": {"title": "다음 단계 안내", "items": ["해지 신청서 작성"]}
+            "announcement": {"title": "안내 멘트", "items": ["고객님, 기가인터넷 슬림 약정 해지 관련 안내드리겠습니다.", "현재 36개월 약정 중 20개월을 이용하셨습니다."]},
+            "cautions": {"title": "주의사항", "items": ["잔여 약정 16개월에 대한 할인반환금이 발생합니다.", "공유기 미반납 시 장비비가 별도 청구됩니다."]},
+            "check_required": {"title": "확인 필요 사항", "items": ["정확한 약정 시작일 확인", "결합상품 이용 여부 확인"]},
+            "next_steps": {"title": "다음 단계 안내", "items": ["타사 번호이동 예약 진행", "장비 반납 안내 (KT플라자 또는 택배)"]}
         }}
     )
     processing_time_ms: Optional[float] = Field(
@@ -645,27 +665,42 @@ class DirectFullGuideResponse(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "original_summary": "인터넷 해지 위약금 문의",
+                    "original_summary": "[인터넷] 기가인터넷 슬림 36개월 약정 고객, 20개월 사용 후 타사 이동 희망. 위약금과 장비 반납 절차 문의.",
                     "search_method": "direct_embedding",
                     "response_guide": {
                         "announcement": {
                             "title": "안내 멘트",
-                            "items": ["고객님, 약정 해지 관련 안내드리겠습니다."]
+                            "items": [
+                                "고객님, 기가인터넷 슬림 약정 해지 관련 안내드리겠습니다.",
+                                "현재 36개월 약정 상품으로 20개월을 이용하셨으며, 잔여 기간은 16개월입니다."
+                            ]
                         },
                         "cautions": {
                             "title": "주의사항",
-                            "items": ["중도 해지 시 위약금이 발생합니다."]
+                            "items": [
+                                "잔여 약정 기간 16개월에 대한 할인반환금이 발생합니다.",
+                                "기가인터넷 슬림은 월 5,500원 할인 적용 상품으로, 예상 위약금은 약 88,000원입니다.",
+                                "KT 공유기를 미반납하시면 장비비가 별도 청구됩니다."
+                            ]
                         },
                         "check_required": {
                             "title": "확인 필요 사항",
-                            "items": ["정확한 가입일자 확인"]
+                            "items": [
+                                "정확한 약정 시작일 및 이용 기간 확인",
+                                "인터넷+TV 또는 가족결합 이용 여부 확인",
+                                "공유기 임대 여부 확인"
+                            ]
                         },
                         "next_steps": {
                             "title": "다음 단계 안내",
-                            "items": ["해지 신청서 작성 안내"]
+                            "items": [
+                                "타사 번호이동 예약 후 자동 해지 처리",
+                                "해지 완료까지 3~5영업일 소요",
+                                "장비 반납: 가까운 KT플라자 방문 또는 택배 반납 가능"
+                            ]
                         }
                     },
-                    "processing_time_ms": 789.0
+                    "processing_time_ms": 2150.0
                 }
             ]
         }

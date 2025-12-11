@@ -736,24 +736,31 @@ async def detect_category_with_llm(query: str) -> list:
         model=settings.ANSWER_MODEL,
         api_key=settings.OPENAI_API_KEY,
         temperature=0,
-        max_tokens=50,
+        max_tokens=20,
+        reasoning_effort="minimal",
     )
 
-    prompt = ChatPromptTemplate.from_template("""통신사 고객센터 질문을 분석하여 해당하는 카테고리를 판별하세요.
-
-카테고리 목록:
+    prompt = ChatPromptTemplate.from_template("""카테고리 목록:
 - mobile: 모바일/휴대폰 요금제, 5G, LTE, 3G, 데이터, 통화, 문자, 로밍
 - internet: 인터넷 요금제, 광랜, 기가인터넷, 와이파이, 회선 속도
 - tv: TV 요금제, IPTV, 올레tv, 지니tv, 채널, VOD, 셋톱박스
-- bundle: 결합할인, 뭉치면 올레, 가족결합, 묶음할인, 패밀리
-- membership: 멤버십, 포인트, VIP, 등급 혜택, 쿠폰
+- bundle: 결합할인, 뭉치면올레, 가족결합, 패밀리, 묶음할인
+- membership: 멤버십, 포인트, VIP, 등급, 쿠폰 혜택
 
 질문: {query}
 
 규칙:
-1. 해당하는 카테고리만 출력 (예: mobile 또는 mobile,bundle)
-2. 여러 카테고리면 쉼표로 구분
-3. 판단 불가시 all 출력
+1. 질문에서 언급되거나 강하게 연관된 카테고리만 선택한다.
+2. 여러 카테고리가 해당되면 쉼표(,)로 구분하여 출력한다.
+3. 어떤 카테고리에도 명확히 해당하지 않으면 "all"을 출력한다.
+4. 카테고리명만 출력하고 설명은 포함하지 않는다.
+
+출력 형식 예시:
+mobile
+ 혹은
+mobile,bundle
+ 혹은
+all
 
 카테고리:""")
 
@@ -764,12 +771,17 @@ async def detect_category_with_llm(query: str) -> list:
         result = result.strip().lower()
 
         if result == "all" or not result:
+            logger.info(f"[CategoryDetect-LLM] '{query[:30]}...' → 전체 (LLM 응답: '{result}')")
             return []
 
         categories = [c.strip() for c in result.split(",")]
         valid_categories = [c for c in categories if c in CATEGORY_KEYWORDS]
 
-        logger.info(f"[CategoryDetect-LLM] '{query[:30]}...' → {valid_categories}")
+        if valid_categories:
+            logger.info(f"[CategoryDetect-LLM] '{query[:30]}...' → {valid_categories}")
+        else:
+            logger.info(f"[CategoryDetect-LLM] '{query[:30]}...' → 전체 (유효하지 않은 카테고리: {categories})")
+
         return valid_categories
 
     except Exception as e:
@@ -923,3 +935,5 @@ async def expand_query_async(query: str) -> str:
     logger.info(f"[QueryExpansion] 완료 - 소요시간: {duration:.3f}초")
 
     return expanded_query
+
+
