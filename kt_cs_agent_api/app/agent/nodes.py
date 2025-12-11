@@ -166,42 +166,49 @@ def analyzer_node(state: AgentState) -> dict:
 def search_node(state: AgentState) -> dict:
     """
     [Node 2] 하이브리드 검색 수행
-    
+
     추출된 키워드로 벡터 DB에서 관련 문서를 검색합니다.
+    카테고리 자동 판별로 관련 문서만 검색합니다.
     두 가지 검색 전략을 조합합니다:
-    
+
     1. Scoped Search: 특정 문서 내에서 집중 검색 (k=2)
-    2. Global Search: 전체 문서에서 보완 검색 (k=3)
-    
+    2. Global Search: 카테고리 필터 적용 전체 검색 (k=3)
+
     입력 (state):
         - target_doc_name: 대상 문서 이름 (또는 "없음")
         - search_query: 검색 키워드
-    
+
     출력 (dict):
         - documents: 검색된 Document 리스트 (중복 제거됨)
-    
-    Note:
-        검색 결과는 content 앞 50자 기준으로 중복 제거됩니다.
+
+    카테고리:
+        - tv: TV 요금제
+        - bundle: 결합 요금제
+        - mobile_internet: 인터넷, 모바일 요금제
+        - membership: 멤버십 혜택
     """
     target_name = state["target_doc_name"]
     query = state["search_query"]
-    
+
     logger.info(f"[Searcher] 검색 시작 - 문서: [{target_name}], 키워드: [{query}]")
     start_time = time.perf_counter()
-    
+
     # DB 매니저 및 문서 레지스트리 가져오기
     db_manager = get_vector_db_manager()
     doc_registry = get_doc_registry()
-    
+
+    # 카테고리 판별
+    categories = detect_category_from_query(query)
+
     docs = []
-    
+
     # -----------------------------------------
     # 전략 1: Scoped Search (타겟 문서 집중 검색)
     # -----------------------------------------
     if target_name != "없음" and doc_registry.has_document(target_name):
         real_path = doc_registry.get_document_path(target_name)
         logger.info(f"[Searcher] Scoped 검색: '{target_name}' (k=2)")
-        
+
         try:
             scoped_results = db_manager.similarity_search(
                 query,
@@ -214,13 +221,13 @@ def search_node(state: AgentState) -> dict:
             logger.warning(f"[Searcher] Scoped 검색 오류: {e}")
     else:
         logger.info("[Searcher] Scoped 검색 스킵 (대상 문서 없음)")
-    
+
     # -----------------------------------------
-    # 전략 2: Global Search (전체 범위 검색)
+    # 전략 2: Global Search (카테고리 필터 적용)
     # -----------------------------------------
-    logger.info("[Searcher] Global 검색 수행 (k=3)")
+    logger.info(f"[Searcher] Global 검색 수행 (k=3, 카테고리: {categories or '전체'})")
     try:
-        global_results = db_manager.similarity_search(query, k=3)
+        global_results = db_manager.similarity_search_by_categories(query, categories, k=3)
         docs.extend(global_results)
         logger.debug(f"[Searcher] Global 검색 결과: {len(global_results)}개")
     except Exception as e:
@@ -399,21 +406,20 @@ def direct_embedding_search_node(state: AgentState) -> dict:
 
     기존 analyzer_node처럼 키워드를 추출하지 않고,
     상담 요약문 자체를 임베딩하여 벡터 DB에서 유사 문서를 검색합니다.
+    카테고리 자동 판별로 관련 문서만 검색합니다.
 
     입력 (state):
         - summary: 상담 내용 요약 텍스트
 
     출력 (dict):
         - documents: 검색된 Document 리스트
+        - detected_categories: 감지된 카테고리 리스트
 
-    장점:
-        - 키워드 추출 과정 생략으로 속도 향상
-        - 문맥 전체를 반영한 검색 가능
-        - LLM API 호출 비용 절감
-
-    Note:
-        similarity_search 내부에서 임베딩 모델을 통해
-        요약문을 벡터로 변환하여 유사도 검색을 수행합니다.
+    카테고리:
+        - tv: TV 요금제
+        - bundle: 결합 요금제
+        - mobile_internet: 인터넷, 모바일 요금제
+        - membership: 멤버십 혜택
     """
     summary = state["summary"]
 
@@ -424,12 +430,16 @@ def direct_embedding_search_node(state: AgentState) -> dict:
     db_manager = get_vector_db_manager()
 
     # -----------------------------------------
-    # 요약문 직접 임베딩하여 유사도 검색 수행
+    # 카테고리 판별
+    # -----------------------------------------
+    categories = detect_category_from_query(summary)
+
+    # -----------------------------------------
+    # 카테고리 필터 적용하여 유사도 검색 수행
     # -----------------------------------------
     try:
-        # summary 자체를 쿼리로 사용 (내부적으로 임베딩 처리됨)
-        docs = db_manager.similarity_search(summary, k=5)
-        logger.debug(f"[DirectSearch] 검색 결과: {len(docs)}개 문서")
+        docs = db_manager.similarity_search_by_categories(summary, categories, k=5)
+        logger.debug(f"[DirectSearch] 검색 결과: {len(docs)}개 문서 (카테고리: {categories or '전체'})")
     except Exception as e:
         logger.error(f"[DirectSearch] 검색 오류: {e}")
         docs = []
@@ -505,11 +515,12 @@ def keyword_guide_node(state: AgentState) -> dict:
     # LLM 모델 초기화
     # -----------------------------------------
     llm = ChatOpenAI(
-        model=settings.ANALYZER_MODEL,
+        # model=settings.ANSWER_MODEL,
+        model=settings.RESPONSE_MODEL,
         api_key=settings.OPENAI_API_KEY,
         temperature=0,
         # max_completion_tokens=300,
-        reasoning_effort="minimal",
+        # reasoning_effort="minimal",
         streaming=False
     )
 
@@ -559,20 +570,27 @@ def keyword_guide_node(state: AgentState) -> dict:
 - 상담원이 자신의 말로 정제할 수 있도록 필요 데이터 제공
 - 각 points 항목은 짧은 문구로 작성 (10단어 이내)
 - 문서에 없는 내용은 작성 금지
-- 2~6개의 주제를 생성
 
 반드시 아래 JSON 형식으로만 출력하세요. 다른 텍스트는 포함하지 마세요:
 {{
     "guide_items": [
         {{
-            "topic": "주제1",
+            "topic": "분류1",
             "points": ["핵심내용1", "핵심내용2", "핵심내용3"]
         }},
         {{
-            "topic": "주제2",
+            "topic": "분류2",
             "points": ["핵심내용1", "핵심내용2"]
         }}
     ]
+}}
+
+- 문서에 사실이 충분하지 않다면 빈 배열을 반환하세요.
+- topic 또는 points를 임의로 생성하거나 추론하지 마세요.
+- 상담 가이드는 생성하지 마세요. 문서에 있는 사실만 요약하세요.
+- 문서에 사실이 거의 없을 경우 아래 형태로만 출력하세요:
+{{
+  "guide_items": []
 }}
 
 예시 출력:
@@ -619,3 +637,304 @@ def keyword_guide_node(state: AgentState) -> dict:
     logger.info(f"[KeywordGuide] 완료 - 소요시간: {duration:.3f}초")
 
     return {"keyword_guide": keyword_guide}
+
+
+# ==========================================
+# 카테고리 판별 관련 상수 및 함수
+# ==========================================
+
+# 카테고리별 키워드 매핑 (5개 카테고리)
+CATEGORY_KEYWORDS = {
+    "mobile": [
+        "모바일", "휴대폰", "스마트폰", "5G", "LTE", "3G",
+        "통화", "문자", "로밍", "해외", "번호이동", "기기변경", "유심",
+        "데이터", "무제한"
+    ],
+    "internet": [
+        "인터넷", "광랜", "기가", "와이파이", "wifi", "공유기",
+        "속도", "회선", "광케이블", "유선"
+    ],
+    "tv": [
+        "tv", "티비", "IPTV", "올레tv", "셋톱박스", "채널", "VOD",
+        "지니tv", "skylife", "스카이라이프", "방송", "시청"
+    ],
+    "bundle": [
+        "결합", "뭉치면", "가족결합", "인터넷결합", "묶음", "패밀리",
+        "올레가", "프리미엄가족", "결합할인", "동시가입"
+    ],
+    "membership": [
+        "멤버십", "포인트", "VIP", "혜택", "적립", "쿠폰",
+        "제휴", "할인쿠폰", "등급", "리워드"
+    ]
+}
+
+# 공통 키워드 (여러 카테고리에 적용)
+COMMON_KEYWORDS = {
+    "요금제": ["mobile", "internet", "tv"],  # 요금제는 모바일/인터넷/TV 모두 해당
+    "월정액": ["mobile", "internet", "tv"],
+    "약정": ["mobile", "internet", "tv", "bundle"],
+    "위약금": ["mobile", "internet", "tv", "bundle"],
+    "해지": ["mobile", "internet", "tv", "bundle"],
+}
+
+
+def detect_category_from_query(query: str) -> list:
+    """
+    질문에서 관련 카테고리를 판별합니다.
+
+    Args:
+        query: 사용자 질문
+
+    Returns:
+        list: 관련 카테고리 리스트 (예: ["tv", "bundle"])
+              빈 리스트면 전체 검색
+
+    카테고리:
+        - mobile: 모바일 요금제
+        - internet: 인터넷 요금제
+        - tv: TV 요금제
+        - bundle: 결합 요금제
+        - membership: 멤버십 혜택
+    """
+    query_lower = query.lower()
+    detected = set()
+
+    # 1. 공통 키워드 체크 (여러 카테고리에 적용)
+    for keyword, categories in COMMON_KEYWORDS.items():
+        if keyword.lower() in query_lower:
+            detected.update(categories)
+
+    # 2. 카테고리별 전용 키워드 체크
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword.lower() in query_lower:
+                detected.add(category)
+                break
+
+    detected = list(detected)
+
+    if detected:
+        logger.info(f"[CategoryDetect] 질문: '{query[:30]}...' → 카테고리: {detected}")
+    else:
+        logger.info(f"[CategoryDetect] 질문: '{query[:30]}...' → 전체 검색")
+
+    return detected
+
+
+async def detect_category_with_llm(query: str) -> list:
+    """
+    LLM을 사용하여 질문의 카테고리를 판별합니다.
+
+    Args:
+        query: 사용자 질문
+
+    Returns:
+        list: 관련 카테고리 리스트
+    """
+    import asyncio
+
+    llm = ChatOpenAI(
+        model=settings.ANSWER_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+        temperature=0,
+        max_tokens=20,
+        reasoning_effort="minimal",
+    )
+
+    prompt = ChatPromptTemplate.from_template("""카테고리 목록:
+- mobile: 모바일/휴대폰 요금제, 5G, LTE, 3G, 데이터, 통화, 문자, 로밍
+- internet: 인터넷 요금제, 광랜, 기가인터넷, 와이파이, 회선 속도
+- tv: TV 요금제, IPTV, 올레tv, 지니tv, 채널, VOD, 셋톱박스
+- bundle: 결합할인, 뭉치면올레, 가족결합, 패밀리, 묶음할인
+- membership: 멤버십, 포인트, VIP, 등급, 쿠폰 혜택
+
+질문: {query}
+
+규칙:
+1. 질문에서 언급되거나 강하게 연관된 카테고리만 선택한다.
+2. 여러 카테고리가 해당되면 쉼표(,)로 구분하여 출력한다.
+3. 어떤 카테고리에도 명확히 해당하지 않으면 "all"을 출력한다.
+4. 카테고리명만 출력하고 설명은 포함하지 않는다.
+
+출력 형식 예시:
+mobile
+ 혹은
+mobile,bundle
+ 혹은
+all
+
+카테고리:""")
+
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        result = await asyncio.to_thread(chain.invoke, {"query": query})
+        result = result.strip().lower()
+
+        if result == "all" or not result:
+            logger.info(f"[CategoryDetect-LLM] '{query[:30]}...' → 전체 (LLM 응답: '{result}')")
+            return []
+
+        categories = [c.strip() for c in result.split(",")]
+        valid_categories = [c for c in categories if c in CATEGORY_KEYWORDS]
+
+        if valid_categories:
+            logger.info(f"[CategoryDetect-LLM] '{query[:30]}...' → {valid_categories}")
+        else:
+            logger.info(f"[CategoryDetect-LLM] '{query[:30]}...' → 전체 (유효하지 않은 카테고리: {categories})")
+
+        return valid_categories
+
+    except Exception as e:
+        logger.warning(f"[CategoryDetect-LLM] 실패, 키워드 기반 폴백: {e}")
+        return detect_category_from_query(query)
+
+
+def query_expansion_node(state: AgentState) -> dict:
+    """
+    [Node] 질문 확장 노드
+
+    모호하거나 짧은 질문을 검색에 적합하도록 확장합니다.
+    벡터 검색의 품질을 높이기 위해 관련 키워드와 문맥을 추가합니다.
+
+    입력 (state):
+        - summary: 원본 상담 요약/질문
+
+    출력 (dict):
+        - expanded_query: 확장된 검색 쿼리
+
+    예시:
+        입력: "요금제 종류"
+        출력: "요금제 종류 5G LTE 월정액 데이터 무제한 요금 가격 혜택 할인"
+
+        입력: "해지"
+        출력: "해지 위약금 약정 해지 절차 방법 잔여 개월 할인 반환금"
+    """
+    summary = state["summary"]
+    logger.info(f"[QueryExpansion] 질문 확장 시작: '{summary[:50]}...'")
+    start_time = time.perf_counter()
+
+    # LLM 모델 초기화
+    llm = ChatOpenAI(
+        model=settings.ANSWER_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+        temperature=0,
+        # max_completion_tokens=300,
+        reasoning_effort="minimal",
+        streaming=False
+    )
+
+    # 질문 확장 프롬프트
+    prompt = ChatPromptTemplate.from_template("""
+당신은 통신사 고객센터 검색 시스템의 쿼리 확장 전문가입니다.
+사용자 질문을 벡터 검색에 적합하도록, 짧은 자연어 문장으로 확장하세요.
+
+원본 질문: {query}
+
+규칙:
+1. 원본 질문의 핵심 의도를 유지하세요.
+2. "요금제 이름, 월정액, 데이터 제공량, 통화 제공량, 위약금, 약정 조건, 부가서비스 세부 내용" 등
+   실제 문서에 존재할 수 있는 사실 정보 위주로 확장하세요.
+3. 상담 멘트, 추천 문구, 안내 문장(예: "~을 안내합니다", "~을 추천드립니다")은 포함하지 마세요.
+4. 관련 키워드를 무작정 나열하지 말고, 1~2개의 짧은 문장으로 표현하세요.
+5. 통신사 업무 범위 안에서, 검색 대상을 적절히 좁히세요.
+   - 예: "요금제 종류" → "모바일 요금제의 플랜 이름과 월 요금, 데이터 제공량을 설명하는 공식 요금제 문서"
+6. 40단어 이내의 자연어 문장으로만 출력하세요.
+7. 쉼표로 나열된 키워드 리스트 형태로 쓰지 마세요.
+
+확장된 쿼리:""")
+
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        raw_response = chain.invoke({"query": summary})
+        expanded_query = raw_response.strip()
+
+        # 빈 응답이거나 너무 짧으면 원본 사용
+        if not expanded_query or len(expanded_query) < len(summary):
+            logger.warning(f"[QueryExpansion] 확장 결과가 부적절함 ('{raw_response}'), 원본 사용")
+            expanded_query = summary
+        else:
+            logger.info(f"[QueryExpansion] 확장 결과: '{expanded_query}'")
+    except Exception as e:
+        logger.warning(f"[QueryExpansion] 확장 실패, 원본 사용: {e}")
+        expanded_query = summary
+
+    duration = time.perf_counter() - start_time
+    logger.info(f"[QueryExpansion] 완료 - 소요시간: {duration:.3f}초")
+
+    return {"expanded_query": expanded_query}
+
+
+async def expand_query_async(query: str) -> str:
+    """
+    질문 확장 유틸리티 함수 (비동기)
+
+    API 레이어에서 직접 호출 가능한 독립적인 함수입니다.
+
+    Args:
+        query: 원본 질문/요약문
+
+    Returns:
+        str: 확장된 쿼리 (실패 시 원본 반환)
+
+    사용 예시:
+        expanded = await expand_query_async("요금제 종류")
+    """
+    import asyncio
+
+    logger.info(f"[QueryExpansion] 비동기 질문 확장 시작: '{query[:50]}...'")
+    start_time = time.perf_counter()
+
+    llm = ChatOpenAI(
+        model=settings.ANSWER_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+        temperature=0,
+        # max_completion_tokens=300,
+        reasoning_effort="minimal",
+        streaming=False
+    )
+
+    prompt = ChatPromptTemplate.from_template("""
+당신은 통신사 고객센터 검색 시스템의 쿼리 확장 전문가입니다.
+사용자 질문을 벡터 검색에 적합하도록, 짧은 자연어 문장으로 확장하세요.
+
+원본 질문: {query}
+
+규칙:
+1. 원본 질문의 핵심 의도를 유지하세요.
+2. "요금제 이름, 월정액, 데이터 제공량, 통화 제공량, 위약금, 약정 조건, 부가서비스 세부 내용" 등
+   실제 문서에 존재할 수 있는 사실 정보 위주로 확장하세요.
+3. 상담 멘트, 추천 문구, 안내 문장(예: "~을 안내합니다", "~을 추천드립니다")은 포함하지 마세요.
+4. 관련 키워드를 무작정 나열하지 말고, 1~2개의 짧은 문장으로 표현하세요.
+5. 통신사 업무 범위 안에서, 검색 대상을 적절히 좁히세요.
+   - 예: "요금제 종류" → "모바일 요금제의 플랜 이름과 월 요금, 데이터 제공량을 설명하는 공식 요금제 문서"
+6. 40단어 이내의 자연어 문장으로만 출력하세요.
+7. 쉼표로 나열된 키워드 리스트 형태로 쓰지 마세요.
+
+확장된 쿼리:""")
+
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        raw_response = await asyncio.to_thread(
+            chain.invoke, {"query": query}
+        )
+        expanded_query = raw_response.strip()
+
+        # 빈 응답이거나 너무 짧으면 원본 사용
+        if not expanded_query or len(expanded_query) < len(query):
+            logger.warning(f"[QueryExpansion] 확장 결과가 부적절함 ('{raw_response}'), 원본 사용")
+            expanded_query = query
+        else:
+            logger.info(f"[QueryExpansion] 확장 결과: '{expanded_query}'")
+    except Exception as e:
+        logger.warning(f"[QueryExpansion] 확장 실패, 원본 사용: {e}")
+        expanded_query = query
+
+    duration = time.perf_counter() - start_time
+    logger.info(f"[QueryExpansion] 완료 - 소요시간: {duration:.3f}초")
+
+    return expanded_query
+
+

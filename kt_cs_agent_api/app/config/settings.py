@@ -109,7 +109,12 @@ class Settings(BaseSettings):
         default="gpt-4o-mini",
         description="응답 생성용 LLM 모델"
     )
-    
+
+    ANSWER_MODEL: str = Field(
+        default="gpt-5-nano",
+        description="답변 생성용 LLM 모델"
+    )
+
     # ==========================================
     # [선택] 서버 설정
     # ==========================================
@@ -209,7 +214,7 @@ class Settings(BaseSettings):
 
     # 질문 정규화용 LLM 모델 (저비용 모델 권장)
     NORMALIZER_MODEL: str = Field(
-        default="gpt-4o-mini",
+        default="gpt-5-nano",
         description="질문 정규화용 LLM 모델"
     )
 
